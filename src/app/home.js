@@ -34,17 +34,17 @@ const x_vec_base = new THREE.Vector3(1,0,0).normalize()
 const y_vec_base = new THREE.Vector3(0,1,0).normalize()
 const z_vec_base = new THREE.Vector3(0,0,1).normalize()
 
-let start_robot_rotation = new THREE.Euler(0,0,0,order)
 let start_rotation = new THREE.Euler(0.6654549523360951,0,0,order)
 let save_rotation = new THREE.Euler(0.6654549523360951,0,0,order)
 let current_rotation = new THREE.Euler(0.6654549523360951,0,0,order)
-const max_move_unit = (1/180)
+const max_move_unit = [(1/120),(1/100),(1/120),(1/150),(1/150),(1/240)]
 const rotate_table = [[],[],[],[],[],[]]
 const object3D_table = []
 const rotvec_table = [y_vec_base,x_vec_base,x_vec_base,y_vec_base,x_vec_base,z_vec_base]
 let target_move_distance = 0
 const target_move_speed = (1000/0.5)
 let real_target = {x:0.4,y:0.5,z:-0.4}
+let baseObject3D = new THREE.Object3D()
 
 const j1_Correct_value = 180.0
 const j2_Correct_value = 0.0
@@ -85,6 +85,8 @@ let save_thumbstickmoved = 0
 let firstReceiveJoint = true
 let viewer_tool_change = false
 
+let switchingVrMode = false
+
 export default function Home(props) {
   //const [tick, setTick] = React.useState(0)
   //const [now, setNow] = React.useState(new Date())
@@ -92,6 +94,14 @@ export default function Home(props) {
   const robotNameList = ["Model"]
   const [robotName,set_robotName] = React.useState(robotNameList[0])
   const [target_error,set_target_error] = React.useState(false)
+
+  const vrModeAngle_ref = React.useRef(0)
+  let vrModeAngle = vrModeAngle_ref.current
+  const set_vrModeAngle = (new_angle)=>{
+    document.cookie = `vrModeAngle=${new_angle}; path=/; max-age=31536000;`
+    vrModeAngle = vrModeAngle_ref.current = new_angle
+    set_update((flg)=>!flg)
+  }
 
   //const [j1_rotate,set_j1_rotate] = React.useState(0)
   const j1_rotate_ref = React.useRef(0)
@@ -154,6 +164,8 @@ export default function Home(props) {
   //const [rotate, set_rotate] = React.useState([0,0,0,0,0,0,0])  //出力用
   const rotateRef = React.useRef([0,0,0,0,0,0,0]); // ref を使って rotate を保持する
 
+  const prevRotateRef = React.useRef([0,0,0,0,0,0,0]) //前回の関節角度
+
   const [input_rotate, set_input_rotate] = React.useState([undefined,0,0,0,0,0,0])  //入力用
 
   //const [p11_object,set_p11_object] = React.useState()
@@ -191,6 +203,7 @@ export default function Home(props) {
   const [c_deg_z,set_c_deg_z] = React.useState(0)
 
   const [wrist_rot,set_wrist_rot_org] = React.useState({x:180,y:0,z:0})
+  const wristRotRef = React.useRef(wrist_rot);
   const [tool_rotate,set_tool_rotate] = React.useState(0)
   const [wrist_degree,set_wrist_degree] = React.useState({direction:0,angle:0})
   const [dsp_message,set_dsp_message] = React.useState("")
@@ -205,33 +218,73 @@ export default function Home(props) {
   const [do_target_update, set_do_target_update] = React.useState(0) // count up for each target_update call
   const [update, set_update] = React.useState(false)
 
+  function getCookie(name) {
+    const value = document.cookie
+      .split('; ')
+      .find(row => row.startsWith(name + '='));
+    return value ? value.split('=')[1] : undefined;
+  }
+
   React.useEffect(() => {
-    requestAnimationFrame(get_real_joint_rot)
+    const wk_vrModeAngle = getCookie('vrModeAngle')
+    set_vrModeAngle(wk_vrModeAngle?parseFloat(wk_vrModeAngle):0)
+    if(!props.viewer){
+      requestAnimationFrame(get_real_joint_rot)
+    }
   },[])
 
   const get_real_joint_rot = ()=>{
-    if(object3D_table.length === 6){
-      const axis_tbl = ['y','x','x','y','x','z']
-      const new_rotate = object3D_table.map((obj3d,idx)=>{
-        return round(toAngle(obj3d.rotation[axis_tbl[idx]]))
-      })
-      //console.log('new_rotate',new_rotate)
+    if(!props.viewer){
+      if(object3D_table.length === 6 && switchingVrMode === false){
+        const axis_tbl = ['y','x','x','y','x','z']
+        const new_rotate = object3D_table.map((obj3d,idx)=>{
+          //return round(toAngle(obj3d.rotation[axis_tbl[idx]]))
+          const qk_q_a = quaternionToAngle(obj3d.quaternion)
+          const flg = qk_q_a.axis[axis_tbl[idx]] < 0
+          return round(qk_q_a.angle * (flg ? -1 : 1))
+        })
+        new_rotate[6] = round(j7_rotate_ref.current)
+        //console.log('new_rotate',new_rotate)
 
+        const prev_rotate = prevRotateRef.current
 
-      /*for(let i=0; i<object3D_table.length; i=i+1){
-        if(object3D_table[i] !== undefined){
-          outRotateConv
-          rotateRef.current[i]
-          console.log('j1',toAngle(object3D_table[i].rotation.y))
+        if(prev_rotate[0] !== new_rotate[0] ||
+          prev_rotate[1] !== new_rotate[1] ||
+          prev_rotate[2] !== new_rotate[2] ||
+          prev_rotate[3] !== new_rotate[3] ||
+          prev_rotate[4] !== new_rotate[4] ||
+          prev_rotate[5] !== new_rotate[5] ||
+          prev_rotate[6] !== new_rotate[6]){
+          //console.log('new_rotate',new_rotate)
+
+          const conv_result = outRotateConv({
+            j1_rotate:new_rotate[0],
+            j2_rotate:new_rotate[1],
+            j3_rotate:new_rotate[2],
+            j4_rotate:new_rotate[3],
+            j5_rotate:new_rotate[4],
+            j6_rotate:new_rotate[5]
+          },[...rotateRef.current])
+
+          const robot_rotate = [
+            conv_result.j1_rotate,
+            conv_result.j2_rotate,
+            conv_result.j3_rotate,
+            conv_result.j4_rotate,
+            conv_result.j5_rotate,
+            conv_result.j6_rotate,
+            new_rotate[6]
+          ]
+          //console.log('robot_rotate',robot_rotate)
+          rotateRef.current = [...robot_rotate]
         }
-
-      }*/
-
-    }
-    if(xrSession !== undefined){
-      xrSession.requestAnimationFrame(get_real_joint_rot)
-    }else{
-      requestAnimationFrame(get_real_joint_rot)
+        prevRotateRef.current = [...new_rotate]
+      }
+      if(xrSession !== undefined){
+        xrSession.requestAnimationFrame(get_real_joint_rot)
+      }else{
+        requestAnimationFrame(get_real_joint_rot)
+      }
     }
   }
 
@@ -242,11 +295,12 @@ export default function Home(props) {
 
   const set_wrist_rot = (new_rot)=>{
     target_move_distance = 0
+    wristRotRef.current = {...new_rot}
     set_wrist_rot_org({...new_rot})
   }
 
   React.useEffect(() => {
-    if(rendered && vrModeRef.current && trigger_on && !tool_menu_on && !tool_load_operation){
+    if(rendered && vrModeRef.current && trigger_on && !tool_menu_on && !tool_load_operation && !switchingVrMode){
       const move_pos = pos_sub(start_pos,controller_object_position)
       move_pos.x = move_pos.x/2
       move_pos.y = move_pos.y/2
@@ -266,7 +320,7 @@ export default function Home(props) {
   },[controller_object_position.x,controller_object_position.y,controller_object_position.z])
 
   React.useEffect(() => {
-    if(rendered && vrModeRef.current && trigger_on && !tool_menu_on && !tool_load_operation){
+    if(rendered && vrModeRef.current && trigger_on && !tool_menu_on && !tool_load_operation && !switchingVrMode){
       const quat_start = new THREE.Quaternion().setFromEuler(start_rotation);
       const quat_controller = new THREE.Quaternion().setFromEuler(controller_object_rotation);
       const quatDifference1 = quat_start.clone().invert().multiply(quat_controller);
@@ -278,17 +332,6 @@ export default function Home(props) {
       current_rotation = new THREE.Euler().setFromQuaternion(wk_mtx,controller_object_rotation.order)
 
       wk_mtx.multiply(
-        new THREE.Quaternion().setFromEuler(start_robot_rotation)
-      ).multiply(
-        new THREE.Quaternion().setFromEuler(
-          new THREE.Euler(
-            (0.6654549523360951*1),  //x
-            0,  //y
-            0,  //z
-            controller_object_rotation.order
-          )
-        )
-      ).multiply(
         new THREE.Quaternion().setFromEuler(
           new THREE.Euler(
             (0.6654549523360951*-1),  //x
@@ -376,11 +419,15 @@ export default function Home(props) {
           current_data.starttime = performance.now()
           current_data.start_quaternion = current_object3D.quaternion.clone()
           current_data.end_quaternion = new THREE.Quaternion().setFromAxisAngle(rotvec_table[i],toRadian(current_data.rot))
-          const move_time_1 = target_move_distance*target_move_speed
-          const wk_euler = new THREE.Quaternion().angleTo(
-            current_data.start_quaternion.clone().invert().multiply(current_data.end_quaternion))
-          const move_time_2 = (toAngle(wk_euler)*max_move_unit)*1000
-          current_data.move_time = Math.max(move_time_1,move_time_2)
+          if(switchingVrMode){
+            current_data.move_time = 0
+          }else{
+            const move_time_1 = target_move_distance*target_move_speed
+            const wk_euler = new THREE.Quaternion().angleTo(
+              current_data.start_quaternion.clone().invert().multiply(current_data.end_quaternion))
+            const move_time_2 = (toAngle(wk_euler)*max_move_unit[i])*1000
+            current_data.move_time = Math.max(move_time_1,move_time_2)
+          }
           current_data.endtime = current_data.starttime + current_data.move_time
         }
         const current_time = performance.now()
@@ -467,13 +514,14 @@ export default function Home(props) {
     return diff; // プラスならaはbより反時計回り、マイナスなら時計回り
   }
 
-  const outRotateConv = (rotate)=>{
+  const outRotateConv = (rotate,prevRotate)=>{
     const base_rot = [rotate.j1_rotate,rotate.j2_rotate,rotate.j3_rotate,rotate.j4_rotate,rotate.j5_rotate,rotate.j6_rotate]
-    const Correct_value = [j1_Correct_value,j2_Correct_value,j3_Correct_value,j4_Correct_value,j5_Correct_value,j6_Correct_value]
+    const wk_j1_Correct_value =  normalize180(j1_Correct_value - (vrModeRef.current?vrModeAngle_ref.current:0))
+    const Correct_value = [wk_j1_Correct_value,j2_Correct_value,j3_Correct_value,j4_Correct_value,j5_Correct_value,j6_Correct_value]
     const new_rot = base_rot.map((base, idx) => round(normalize180(base + Correct_value[idx])))
-    const diff = new_rot.map((rot,idx)=>shortestAngleDiffSigned(rot,rotateRef.current[idx]))
+    const diff = new_rot.map((rot,idx)=>shortestAngleDiffSigned(rot,prevRotate[idx]))
     const result_rot = new_rot.map((rot,idx)=>{
-      const result_value = rotateRef.current[idx] + diff[idx]
+      const result_value = prevRotate[idx] + diff[idx]
       if(Math.abs(result_value) < 360){
         if(result_value >= 180){
           return round((rot + 360) % 360)
@@ -501,38 +549,43 @@ export default function Home(props) {
     }
     //setTimeout(()=>{joint_slerp()},0)
 
-    const conv_result = outRotateConv(
-      {j1_rotate,j2_rotate,j3_rotate,j4_rotate,j5_rotate,j6_rotate:normalize180(j6_rotate+tool_rotate)})
+    if(props.viewer){
+      const conv_result = outRotateConv(
+        {j1_rotate,j2_rotate,j3_rotate,j4_rotate,j5_rotate,j6_rotate:normalize180(j6_rotate+tool_rotate)},
+        [...rotateRef.current]
+      )
 
-    const new_rotate = [
-      conv_result.j1_rotate,
-      conv_result.j2_rotate,
-      conv_result.j3_rotate,
-      conv_result.j4_rotate,
-      conv_result.j5_rotate,
-      conv_result.j6_rotate,
-      round(j7_rotate)
-    ]
-    //set_rotate(new_rotate)
-    rotateRef.current = [...new_rotate]
-    //console.log("Real Rotate:",new_rotate)
+      const new_rotate = [
+        conv_result.j1_rotate,
+        conv_result.j2_rotate,
+        conv_result.j3_rotate,
+        conv_result.j4_rotate,
+        conv_result.j5_rotate,
+        conv_result.j6_rotate,
+        round(j7_rotate)
+      ]
+      //set_rotate(new_rotate)
+      rotateRef.current = [...new_rotate]
+      //console.log("Real Rotate:",new_rotate)
+    }
   }, [j1_rotate,j2_rotate,j3_rotate,j4_rotate,j5_rotate,j6_rotate,j7_rotate])
 
   React.useEffect(() => {
     if(input_rotate[0] === undefined) return
+    const wk_j1_Correct_value =  normalize180(j1_Correct_value - (vrModeRef.current?vrModeAngle_ref.current:0))
     const robot_rotate = {
-      j1_rotate:round(normalize180(input_rotate[0]-j1_Correct_value)),
+      j1_rotate:round(normalize180(input_rotate[0]-wk_j1_Correct_value)),
       j2_rotate:round(normalize180(input_rotate[1]-j2_Correct_value)),
       j3_rotate:round(normalize180(input_rotate[2]-j3_Correct_value)),
       j4_rotate:round(normalize180(input_rotate[3]-j4_Correct_value)),
       j5_rotate:round(normalize180(input_rotate[4]-j5_Correct_value)),
       j6_rotate:round(normalize180(input_rotate[5]-j6_Correct_value))
     }
-    console.log("rec_joints",robot_rotate)
+    //console.log("rec_joints",robot_rotate)
+    //console.log("j3_rotate",input_rotate[2])
     const {target_pos, wrist_euler} = getReaultPosRot(robot_rotate) // これで target_pos が計算される
-    set_wrist_rot_org(
-      {x:round(toAngle(wrist_euler.x)),y:round(toAngle(wrist_euler.y)),z:round(toAngle(wrist_euler.z))}
-    ) // 手首の相対
+    wristRotRef.current = {x:round(toAngle(wrist_euler.x)),y:round(toAngle(wrist_euler.y)),z:round(toAngle(wrist_euler.z))}
+    set_wrist_rot_org({...wristRotRef.current}) // 手首の相対
     set_target_org((vr)=>{
           target_move_distance = distance({x:vr.x,y:vr.y,z:vr.z},{x:target_pos.x,y:target_pos.y,z:target_pos.z}) // 位置の差分を計算
           vr.x = round(target_pos.x); vr.y = round(target_pos.y); vr.z = round(target_pos.z);
@@ -835,7 +888,7 @@ export default function Home(props) {
     }
 
     if(dsp_message === ""){
-      const check_result = outRotateConv(result_rotate)
+      const check_result = outRotateConv(result_rotate,[...rotateRef.current])
       if(check_result.j1_rotate<-270 || check_result.j1_rotate>270){
         dsp_message = `j1_rotate 指定可能範囲外！:(${check_result.j1_rotate})`
         j1_error = true
@@ -1084,7 +1137,6 @@ export default function Home(props) {
 
   const vrControllStart = ()=>{
     start_rotation = controller_object.rotation.clone()
-    start_robot_rotation = new THREE.Euler(wrist_rot.x,wrist_rot.y,wrist_rot.z,order)
     const wk_start_pos = new THREE.Vector3().applyMatrix4(controller_object.matrix)
     set_start_pos(wk_start_pos)
   }
@@ -1115,8 +1167,11 @@ export default function Home(props) {
         }
       });
       AFRAME.registerComponent('j_id', {
-        schema: {type: 'number', default: 0},
+        schema: {type: 'number', default: undefined},
         init: function () {
+          if(this.data === 0){
+            baseObject3D = this.el.object3D
+          }else
           if(this.data === 1){
             object3D_table[0] = this.el.object3D
           }else
@@ -1331,6 +1386,41 @@ export default function Home(props) {
 //            set_vr_mode(true)
             console.log('enter-vr')
 
+            switchingVrMode = true
+            setTimeout(()=>{
+              switchingVrMode = false
+            },3000)
+            baseObject3D.rotateY(toRadian(vrModeAngle_ref.current))
+            const all_joint_rot = {
+              j1_rotate: normalize180(j1_rotate_ref.current + vrModeAngle_ref.current),
+              j2_rotate: j2_rotate_ref.current,
+              j3_rotate: j3_rotate_ref.current,
+              j4_rotate: j4_rotate_ref.current,
+              j5_rotate: j5_rotate_ref.current,
+              j6_rotate: j6_rotate_ref.current,
+            }
+            const {target_pos, wrist_euler} = getReaultPosRot(all_joint_rot)
+            set_wrist_rot({x:round(toAngle(wrist_euler.x)),y:round(toAngle(wrist_euler.y)),z:round(toAngle(wrist_euler.z))})
+            set_target_org((vr)=>{
+                  target_move_distance = 0
+                  vr.x = round(target_pos.x); vr.y = round(target_pos.y); vr.z = round(target_pos.z);
+                  return vr
+            })
+
+            const rot = {...wristRotRef.current}
+            const q = new THREE.Quaternion().setFromEuler(
+              new THREE.Euler(
+                toRadian(rot.x), toRadian(rot.y), toRadian(rot.z), order
+              )
+            ).multiply(
+              new THREE.Quaternion().setFromAxisAngle(x_vec_base,toRadian(180)) 
+            )
+            const e = new THREE.Euler().setFromQuaternion(q,order)
+            console.log("wrist_rot",toAngle(e.x),toAngle(e.y),toAngle(e.z))
+            save_rotation = new THREE.Euler(
+              e.x + 0.6654549523360951, e.y, e.z, order
+            )
+
             // ここからMQTT Start
             //let xrSession = this.el.renderer.xr.getSession();
             xrSession = this.el.renderer.xr.getSession();
@@ -1420,6 +1510,7 @@ export default function Home(props) {
     c_deg_x,set_c_deg_x,c_deg_y,set_c_deg_y,c_deg_z,set_c_deg_z,
     wrist_rot,set_wrist_rot,
     tool_rotate,set_tool_rotate,normalize180, vr_mode:vrModeRef.current,
+    vrModeAngle, set_vrModeAngle,
     toolChange1, toolChange2
   }
 
@@ -1478,7 +1569,7 @@ export default function Home(props) {
     <>
       <a-scene scene xr-mode-ui={`enabled: ${!props.viewer?'true':'false'}; XRMode: xr`}>
         <a-entity oculus-touch-controls="hand: right" vr-controller-right visible={`${false}`}></a-entity>
-        <a-plane position="0 0 0" rotation="-90 0 0" width="0.4" height="0.4" color={target_error?"#ff7f50":"#7BC8A4"} opacity="0.5"></a-plane>
+        <a-circle position="0 0 0" rotation="-90 0 0" radius="0.25" color={target_error?"#ff7f50":"#7BC8A4"} opacity="0.5"></a-circle>
 
         <Assets viewer={props.viewer}/>
         <Select_Robot {...robotProps}/>
@@ -1544,8 +1635,8 @@ const Assets = (props)=>{
 
 const Model = (props)=>{
   const {visible, cursor_vis, edit_pos, joint_pos, pos_add, j1_error, j2_error, j3_error, j4_error, j5_error, j6_error} = props
-  return (<>{visible?
-    <a-entity robot-click="" gltf-model="#base" position={edit_pos(joint_pos.base)} visible={`${visible}`}>
+  return (<>{visible?<>
+    <a-entity j_id="0"  robot-click="" gltf-model="#base" position={edit_pos(joint_pos.base)} visible={`${visible}`}></a-entity>
       <a-entity geometry="primitive: circle; radius: 0.16;" material="color: #00FFFF" position="0 0.1 0" rotation="-90 0 0" visible={`${j1_error}`}></a-entity>
       <a-entity geometry="primitive: circle; radius: 0.16;" material="color: #00FFFF" position="0 0.1 0" rotation="90 0 0" visible={`${j1_error}`}></a-entity>
       <a-entity j_id="1" gltf-model="#j1" position={edit_pos(joint_pos.j1)} model-opacity="0.8">
@@ -1595,7 +1686,7 @@ const Model = (props)=>{
           {/*<Cursor3dp j_id="11" visible={cursor_vis}/>*/}
         </a-entity>
       </a-entity>
-    </a-entity>:null}</>
+    </>:null}</>
   )
 }
 
