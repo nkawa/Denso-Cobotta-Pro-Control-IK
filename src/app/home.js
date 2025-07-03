@@ -36,7 +36,6 @@ const z_vec_base = new THREE.Vector3(0,0,1).normalize()
 
 let start_rotation = new THREE.Euler(0.6654549523360951,0,0,order)
 let save_rotation = new THREE.Euler(0.6654549523360951,0,0,order)
-let current_rotation = new THREE.Euler(0.6654549523360951,0,0,order)
 const max_move_unit = [(1/120),(1/100),(1/120),(1/150),(1/150),(1/240)]
 const rotate_table = [[],[],[],[],[],[]]
 const object3D_table = []
@@ -161,16 +160,24 @@ export default function Home(props) {
   const [c_deg_y,set_c_deg_y] = useRefState(set_update,0)
   const [c_deg_z,set_c_deg_z] = useRefState(set_update,0)
 
-  const [wrist_rot,set_wrist_rot_org] = useRefState(set_update,{x:180,y:0,z:0})
-  const wristRotRef = React.useRef(wrist_rot);
+  const [wrist_rot,set_wrist_rot_org,wrist_rot_ref] = useRefState(set_update,{x:180,y:0,z:0})
   const [tool_rotate,set_tool_rotate] = useRefState(set_update,0)
   const [wrist_degree,set_wrist_degree] = useRefState(set_update,{direction:0,angle:0})
   const [dsp_message,set_dsp_message] = useRefState(set_update,"")
 
   const toolNameList = ["No tool","Gripper","vgc10-1","vgc10-4","cutter","boxLiftUp"]
-  const [toolName,set_toolName] = useRefState(set_update,toolNameList[1])
+  const [toolName,set_toolName_org] = useRefState(set_update,toolNameList[1])
+  const set_toolName = (newTool)=>{
+    const wk_tool_value = tool_menu_list.indexOf(newTool)
+    if(wk_tool_value >= 0){
+      tool_menu_idx = wk_tool_value
+      tool_current_value = wk_tool_value + 1
+    }
+    document.cookie = `toolName=${newTool}; path=/; max-age=31536000;`
+    set_toolName_org(newTool)
+  }
 
-  const [target,set_target_org] = useRefState(set_update,real_target)
+  const [target,set_target_org,target_ref] = useRefState(set_update,real_target)
   const [p15_16_len,set_p15_16_len] = useRefState(set_update,joint_pos.j7.z+0.14)
   const [p14_maxlen,set_p14_maxlen] = useRefState(set_update,0)
 
@@ -186,6 +193,8 @@ export default function Home(props) {
   React.useEffect(() => {
     const wk_vrModeAngle = getCookie('vrModeAngle')
     set_vrModeAngle(wk_vrModeAngle?parseFloat(wk_vrModeAngle):0)
+    const wk_toolName = getCookie('toolName')
+    set_toolName(wk_toolName?wk_toolName:"Gripper")
     /*if(!props.viewer){
       requestAnimationFrame(get_real_joint_rot)
     }*/
@@ -262,7 +271,6 @@ export default function Home(props) {
 
   const set_wrist_rot = (new_rot)=>{
     target_move_distance = 0
-    wristRotRef.current = {...new_rot}
     set_wrist_rot_org({...new_rot})
   }
 
@@ -296,7 +304,6 @@ export default function Home(props) {
       const quatDifference2 = quat_start.clone().invert().multiply(quat_save);
 
       const wk_mtx = quat_start.clone().multiply(quatDifference1).multiply(quatDifference2)
-      current_rotation = new THREE.Euler().setFromQuaternion(wk_mtx,controller_object_rotation.order)
 
       wk_mtx.multiply(
         new THREE.Quaternion().setFromEuler(
@@ -561,8 +568,7 @@ export default function Home(props) {
     //console.log("rec_joints",robot_rotate)
     //console.log("j3_rotate",input_rotate[2])
     const {target_pos, wrist_euler} = getReaultPosRot(robot_rotate) // これで target_pos が計算される
-    wristRotRef.current = {x:round(toAngle(wrist_euler.x)),y:round(toAngle(wrist_euler.y)),z:round(toAngle(wrist_euler.z))}
-    set_wrist_rot_org({...wristRotRef.current}) // 手首の相対
+    set_wrist_rot_org({x:round(toAngle(wrist_euler.x)),y:round(toAngle(wrist_euler.y)),z:round(toAngle(wrist_euler.z))}) // 手首の相対
     set_target_org((vr)=>{
           target_move_distance = distance({x:vr.x,y:vr.y,z:vr.z},{x:target_pos.x,y:target_pos.y,z:target_pos.z}) // 位置の差分を計算
           vr.x = round(target_pos.x); vr.y = round(target_pos.y); vr.z = round(target_pos.z);
@@ -641,7 +647,7 @@ export default function Home(props) {
                 if(data.tool_change !== undefined){
                   console.log("tool_change!",data.tool_change)
                   viewer_tool_change = true;
-                  setTimeout(()=>{viewer_tool_change = false},29000)
+                  setTimeout(()=>{viewer_tool_change = false},59000)  // 59秒後にリセット
                 }
               }
             }
@@ -1109,7 +1115,25 @@ export default function Home(props) {
   }
 
   const vrControllEnd = ()=>{
-    save_rotation = current_rotation.clone()
+    const wrist_qua = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(
+        toRadian(wrist_rot_ref.current.x),
+        toRadian(wrist_rot_ref.current.y),
+        toRadian(wrist_rot_ref.current.z), order
+      )
+    )
+    const vrcon_qua = wrist_qua.clone().multiply(
+      new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(
+          (0.6654549523360951*-1),  //x
+          Math.PI,  //y
+          Math.PI,  //z
+          order
+        )
+      ).invert()
+    )
+    const vrcon_euler = new THREE.Euler().setFromQuaternion(vrcon_qua,order)
+    save_rotation.copy(vrcon_euler)
     set_save_target(undefined)
   }
 
@@ -1238,7 +1262,7 @@ export default function Home(props) {
                       vrControllStart()
                     }
                     set_update((v)=>v=v+1)
-                  },30000) // 30秒間は操作しない(暫定タイマー)
+                  },60000) // 60秒間は操作しない(暫定タイマー)
                 }else{
                   vrControllEnd()
                   if(trigger_on){
@@ -1358,35 +1382,46 @@ export default function Home(props) {
               switchingVrMode = false
             },3000)
             baseObject3D.rotateY(toRadian(vrModeAngle_ref.current))
-            const all_joint_rot = {
-              j1_rotate: normalize180(j1_rotate_ref.current + vrModeAngle_ref.current),
-              j2_rotate: j2_rotate_ref.current,
-              j3_rotate: j3_rotate_ref.current,
-              j4_rotate: j4_rotate_ref.current,
-              j5_rotate: j5_rotate_ref.current,
-              j6_rotate: j6_rotate_ref.current,
-            }
-            const {target_pos, wrist_euler} = getReaultPosRot(all_joint_rot)
+            const wrist_qua = new THREE.Quaternion().setFromAxisAngle(
+              y_vec_base,toRadian(vrModeAngle_ref.current)
+            ).multiply(
+              new THREE.Quaternion().setFromEuler(
+                new THREE.Euler(
+                  toRadian(wrist_rot_ref.current.x),
+                  toRadian(wrist_rot_ref.current.y),
+                  toRadian(wrist_rot_ref.current.z), order
+                )
+              )
+            )
+            const wrist_euler = new THREE.Euler().setFromQuaternion(wrist_qua,order)
             set_wrist_rot({x:round(toAngle(wrist_euler.x)),y:round(toAngle(wrist_euler.y)),z:round(toAngle(wrist_euler.z))})
+
+            const wk_m4 = new THREE.Matrix4().multiply(
+              new THREE.Matrix4().makeRotationY(toRadian(vrModeAngle_ref.current))
+            ).multiply(
+              new THREE.Matrix4().setPosition(target_ref.current.x,target_ref.current.y,target_ref.current.z)
+            )
+            const target_pos = new THREE.Vector3().applyMatrix4(wk_m4)
             set_target_org((vr)=>{
                   target_move_distance = 0
                   vr.x = round(target_pos.x); vr.y = round(target_pos.y); vr.z = round(target_pos.z);
                   return vr
             })
 
-            const rot = {...wristRotRef.current}
-            const q = new THREE.Quaternion().setFromEuler(
-              new THREE.Euler(
-                toRadian(rot.x), toRadian(rot.y), toRadian(rot.z), order
-              )
-            ).multiply(
-              new THREE.Quaternion().setFromAxisAngle(x_vec_base,toRadian(180)) 
+            const vrcon_qua = wrist_qua.clone().multiply(
+              new THREE.Quaternion().setFromEuler(
+                new THREE.Euler(
+                  (0.6654549523360951*-1),  //x
+                  Math.PI,  //y
+                  Math.PI,  //z
+                  order
+                )
+              ).invert()
             )
-            const e = new THREE.Euler().setFromQuaternion(q,order)
-            console.log("wrist_rot",toAngle(e.x),toAngle(e.y),toAngle(e.z))
-            save_rotation = new THREE.Euler(
-              e.x + 0.6654549523360951, e.y, e.z, order
-            )
+
+            const vrcon_euler = new THREE.Euler().setFromQuaternion(vrcon_qua,order)
+            console.log("wrist_rot",toAngle(vrcon_euler.x),toAngle(vrcon_euler.y),toAngle(vrcon_euler.z))
+            save_rotation.copy(vrcon_euler)
 
             // ここからMQTT Start
             //let xrSession = this.el.renderer.xr.getSession();
@@ -1413,6 +1448,33 @@ export default function Home(props) {
             //vrModeRef.current = false;
             set_vr_mode(false)
             console.log('exit-vr')
+
+            baseObject3D.rotateY(toRadian(vrModeAngle_ref.current * -1))
+            const wrist_qua = new THREE.Quaternion().setFromAxisAngle(
+              y_vec_base,toRadian(vrModeAngle_ref.current * -1)
+            ).multiply(
+              new THREE.Quaternion().setFromEuler(
+                new THREE.Euler(
+                  toRadian(wrist_rot_ref.current.x),
+                  toRadian(wrist_rot_ref.current.y),
+                  toRadian(wrist_rot_ref.current.z), order
+                )
+              )
+            )
+            const wrist_euler = new THREE.Euler().setFromQuaternion(wrist_qua,order)
+            set_wrist_rot({x:round(toAngle(wrist_euler.x)),y:round(toAngle(wrist_euler.y)),z:round(toAngle(wrist_euler.z))})
+
+            const wk_m4 = new THREE.Matrix4().multiply(
+              new THREE.Matrix4().makeRotationY(toRadian(vrModeAngle_ref.current * -1))
+            ).multiply(
+              new THREE.Matrix4().setPosition(target_ref.current.x,target_ref.current.y,target_ref.current.z)
+            )
+            const target_pos = new THREE.Vector3().applyMatrix4(wk_m4)
+            set_target_org((vr)=>{
+                  target_move_distance = 0
+                  vr.x = round(target_pos.x); vr.y = round(target_pos.y); vr.z = round(target_pos.z);
+                  return vr
+            })
           });
         /*},
         tick: function (t) {*/
