@@ -691,11 +691,18 @@ export default function Home(props) {
   React.useEffect(() => {
     if (typeof window.mqttClient === 'undefined') {
       //サブスクライブするトピックの登録
-      console.log("Start connectMQTT!!")
-      window.mqttClient = connectMQTT(requestRobot);
-      subscribeMQTT([
-        MQTT_DEVICE_TOPIC
-      ]);
+      if (props.virtual){
+        console.log("Virtual mode, no MQTT connect!!")
+        // Virtual mode なので、MQTTは使わない
+        window.mqttClient = undefined;
+        return;// このあとは処理しない
+      }else{
+        console.log("Start connectMQTT!!")
+        window.mqttClient = connectMQTT(requestRobot);
+        subscribeMQTT([
+          MQTT_DEVICE_TOPIC
+        ]);
+      }
 //      console.log("Subscribe:",MQTT_DEVICE_TOPIC);
       //        MQTT_CTRL_TOPIC  // MQTT Version5 なので、 noLocal が効くはず
 
@@ -1815,7 +1822,7 @@ export default function Home(props) {
         <a-entity oculus-touch-controls="hand: right" vr-controller-right visible={`${false}`}></a-entity>
         <a-circle position="0 0 0" rotation="-90 0 0" radius="0.25" color={target_error?"#ff7f50":"#7BC8A4"} opacity="0.5"></a-circle>
 
-        <Assets viewer={props.viewer}/>
+        <Assets viewer={props.viewer} virtual={props.virtual}/>
         <Select_Robot {...robotProps}/>
         <Cursor3dp j_id="20" pos={{x:0,y:0,z:0}} visible={cursor_vis}>
           <Cursor3dp j_id="21" pos={{x:0,y:0,z:p15_16_len}} visible={cursor_vis}></Cursor3dp>
@@ -1836,6 +1843,7 @@ export default function Home(props) {
         <Line pos1={{x:1,y:0.0001,z:0}} pos2={{x:-1,y:0.0001,z:0}} visible={cursor_vis} color="white"></Line>
         <Line pos1={{x:0,y:0.0001,z:1}} pos2={{x:0,y:0.0001,z:-1}} visible={cursor_vis} color="white"></Line>
         {/*<a-cylinder j_id="51" color="green" height="0.1" radius="0.005" position={edit_pos({x:0.3,y:0.3,z:0.3})}></a-cylinder>*/}
+        <a-image src="#expimg" rotation="0 30 0" position="-8 0.5 -10.5" width="10" height="6" visible={`${props.virtual}`}></a-image>
         <Toolmenu />
       </a-scene>
       <Controller {...controllerProps}/>
@@ -1853,14 +1861,14 @@ export default function Home(props) {
   }else{
     return(
       <a-scene xr-mode-ui={`enabled: ${!props.viewer?'true':'false'}; XRMode: xr`}>
-        <Assets viewer={props.viewer}/>
+        <Assets viewer={props.viewer}  virtual={props.virtual}/>
       </a-scene>
     )
   }
 }
 
 const Assets = (props)=>{
-  const path = props.viewer?"../":""
+  const path = (props.viewer|| props.virtual) ?"../":""
   return (
     <a-assets>
       {/*Model*/}
@@ -1879,6 +1887,7 @@ const Assets = (props)=>{
       <a-asset-items id="vgc10-4" src={`${path}gripper_vgc10_4.gltf`} ></a-asset-items>
       <a-asset-items id="cutter" src={`${path}ss-cutter2-end.gltf`} ></a-asset-items>
       <a-asset-items id="boxLiftUp" src={`${path}sanko_box_lift_up_end.gltf`} ></a-asset-items>
+      <a-asset-items id="expimg" src={`${path}20250722_212440.jpg`} ></a-asset-items>
     </a-assets>
   )
 }
