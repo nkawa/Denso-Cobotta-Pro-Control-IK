@@ -9,7 +9,6 @@ import { connectMQTT, mqttclient, idtopic, subscribeMQTT, publishMQTT, codeType 
 
 import StereoVideo from '../lib/stereoWebRTC.js';
 
-
 const MQTT_REQUEST_TOPIC = "mgr/request";
 const MQTT_DEVICE_TOPIC = "dev/" + idtopic;
 const MQTT_CTRL_TOPIC = "control/" + idtopic; // 自分のIDに制御を送信
@@ -76,6 +75,7 @@ let tickprev = 0
 let controller_object = new THREE.Object3D()
 const controller_object_position = new THREE.Vector3()
 const controller_object_quaternion = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0, order))
+let controllerObjectPose = { position: new THREE.Vector3(), quaternion: new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0, order)) }
 let xrSession = undefined
 
 const Toolpos1 = { rot: { x: 90, y: 0, z: 0 }, pos: { x: -0.1, y: -0.02, z: 0.4 }, toolrot: 0 }
@@ -117,6 +117,110 @@ let fallingSpeed = 0 // 落下中の荷物の速度
 let carryLuggage = false
 let boxpos_x = -0.2; // luggage-id 荷物の初期位置
 
+class MovingAverageMotionFilter {
+ constructor(
+   windowSize = 5,
+   moveThreshold = 0.00001 / 35,
+   rotateThreshold = 0.0001 / 35
+ ) {
+   this.windowSize = windowSize;
+   this.moveThreshold = moveThreshold;
+   this.rotateThreshold = rotateThreshold;
+
+   this.positionBuffer = [];
+   this.quaternionBuffer = [];
+
+   this.smoothedPosition = { x: 0, y: 0, z: 0 };
+   this.smoothedQuaternion = new THREE.Quaternion(0, 0, 0, 1);
+ }
+
+ applyFilter(position, quaternion) {
+   const filteredPosition = this.smoothPosition(position);
+   const filteredQuaternion = this.smoothQuaternion(quaternion);
+
+   return {
+     position: filteredPosition,
+     quaternion: filteredQuaternion
+   };
+ }
+
+ smoothPosition(position) {
+   this.positionBuffer.push({ ...position });
+   if (this.positionBuffer.length > this.windowSize) {
+     this.positionBuffer.shift();
+   }
+
+   const sum = this.positionBuffer.reduce((acc, val) => ({
+     x: acc.x + val.x,
+     y: acc.y + val.y,
+     z: acc.z + val.z
+   }), { x: 0, y: 0, z: 0 });
+
+   this.smoothedPosition = {
+     x: sum.x / this.positionBuffer.length,
+     y: sum.y / this.positionBuffer.length,
+     z: sum.z / this.positionBuffer.length
+   };
+
+   this.smoothedPosition.x = Math.abs(this.smoothedPosition.x) < this.moveThreshold ? 0 : this.smoothedPosition.x;
+   this.smoothedPosition.y = Math.abs(this.smoothedPosition.y) < this.moveThreshold ? 0 : this.smoothedPosition.y;
+   this.smoothedPosition.z = Math.abs(this.smoothedPosition.z) < this.moveThreshold ? 0 : this.smoothedPosition.z;
+
+   return { ...this.smoothedPosition };
+ }
+
+ smoothQuaternion(quaternion) {
+   // THREE.Quaternionとしてバッファに追加
+   this.quaternionBuffer.push(quaternion.clone());
+   if (this.quaternionBuffer.length > this.windowSize) {
+     this.quaternionBuffer.shift();
+   }
+
+   if (this.quaternionBuffer.length === 1) {
+     this.smoothedQuaternion = this.quaternionBuffer[0].clone();
+   } else {
+     this.smoothedQuaternion = this.slerpAverage(this.quaternionBuffer);
+   }
+
+   // 回転角度の閾値チェック
+   const identity = new THREE.Quaternion(0, 0, 0, 1);
+   const rotationAngle = this.smoothedQuaternion.angleTo(identity);
+   
+   if (Math.abs(rotationAngle) < this.rotateThreshold) {
+     return new THREE.Quaternion(0, 0, 0, 1); // 単位クォータニオン
+   }
+
+   return this.smoothedQuaternion.clone();
+ }
+
+ slerpAverage(quaternions) {
+   if (quaternions.length === 0) {
+     return new THREE.Quaternion(0, 0, 0, 1);
+   }
+   if (quaternions.length === 1) {
+     return quaternions[0].clone();
+   }
+
+   // 最初のクォータニオンから開始
+   let result = quaternions[0].clone();
+   
+   // 段階的にSLERPで平均化
+   for (let i = 1; i < quaternions.length; i++) {
+     const t = 1.0 / (i + 1);
+     result.slerp(quaternions[i], t);
+   }
+   
+   // THREE.jsのクォータニオンは自動的に正規化されるが、明示的に正規化
+   return result.normalize();
+ }
+
+ reset() {
+   this.positionBuffer = [];
+   this.quaternionBuffer = [];
+   this.smoothedPosition = { x: 0, y: 0, z: 0 };
+   this.smoothedQuaternion = new THREE.Quaternion(0, 0, 0, 1);
+ }
+}
 
 // 再レンダリングしなくて値を更新する（かつ set_update で再レンダリングさせられる）
 function useRefState(updateFunc = undefined, initialValue = undefined) {
@@ -208,6 +312,12 @@ export default function Home(props) {
   const [c_deg_y, set_c_deg_y] = useRefState(set_update, 0)
   const [c_deg_z, set_c_deg_z] = useRefState(set_update, 0)
 
+  const [last_controller_pose, set_last_controller_pose, last_controller_pose_ref] = useRefState(set_update, { position: { x: 0, y: 0, z: 0 }, quaternion: new THREE.Quaternion() }) //コントローラの取得毎の差分計算
+  const [cumulative_controller_pose, set_cumulative_controller_pose, cumulative_controller_pose_ref] = useRefState(set_update, { position: { x: 0, y: 0, z: 0 }, quaternion: new THREE.Quaternion() }) //トリガーを押してからのコントローラ差分の累積結果
+  const noizeFilterRef = React.useRef(null);
+  if (noizeFilterRef.current === null) {
+    noizeFilterRef.current = new MovingAverageMotionFilter();
+  }
 
   const [wrist_rot, set_wrist_rot_org, wrist_rot_ref] = useRefState(set_update, { x: 90, y: 0, z: 0 })
   const [tool_rotate, set_tool_rotate, tool_rotate_ref] = useRefState(set_update, 0)
@@ -360,7 +470,7 @@ export default function Home(props) {
   }
 
   const set_target = (new_pos) => {
-    let wk_new_pos = { ...new_pos }
+    let wk_new_pos = { ...new_pos };
     if (props.appmode === AppMode.practice) { // 練習モードの時のみ     
       if (!carryLuggage) {
         const touchResult = boxTouchCheck(wk_new_pos, target_ref.current)
@@ -411,57 +521,134 @@ export default function Home(props) {
     }
   }
 
-  // コントローラの移動を取得
+  // // コントローラの移動を取得
+  // React.useEffect(() => {
+  //   if (rendered && vrModeRef.current && trigger_on && !tool_menu_on && !tool_load_operation && !put_down_box_operation && !switchingVrMode) {
+  //     const move_pos = pos_sub(start_pos, controller_object_position)
+  //     let target_pos
+  //     if (save_target === undefined) {
+  //       set_save_target({ ...target })
+  //       target_pos = pos_sub(target, move_pos)
+  //     } else {
+  //       target_pos = pos_sub(save_target, move_pos)
+  //     }
+  //     if (target_pos.y < 0.012) {
+  //       target_pos.y = 0.012
+  //     }
+  //     set_target({ x: round(target_pos.x), y: round(target_pos.y), z: round(target_pos.z) })
+  //   }
+  // }, [controller_object_position.x, controller_object_position.y, controller_object_position.z])
+
+  // // コントローラの回転を取得
+  // React.useEffect(() => {
+  //   if (rendered && vrModeRef.current && trigger_on && !tool_menu_on && !tool_load_operation && !put_down_box_operation && !switchingVrMode) {
+  //     const wk_quatDiff1 = controller_progress_quat.clone().invert().multiply(controller_object_quaternion);
+  //     const wk_diff_1 = quaternionToAngle(wk_quatDiff1)
+  //     const quatDifference1 = new THREE.Quaternion().setFromAxisAngle(wk_diff_1.axis, wk_diff_1.radian /3); 
+
+  //     const quatDifference2 = controller_start_quat.clone().invert().multiply(robot_save_quat);
+
+  //     const wk_mtx = controller_start_quat.clone().multiply(quatDifference1).multiply(controller_acc_quat).multiply(quatDifference2);
+  //     if (Math.abs(wk_diff_1.angle) > 135) {
+  //       controller_progress_quat.copy(controller_object_quaternion)
+  //       controller_acc_quat.multiply(quatDifference1)
+  //     }
+
+  //     wk_mtx.multiply(
+  //       new THREE.Quaternion().setFromEuler(
+  //         new THREE.Euler(
+  //           (0.6654549523360951 * -1),  //x
+  //           Math.PI,  //y
+  //           Math.PI,  //z
+  //           order
+  //         )
+  //       )
+  //     )
+
+  //     const wk_euler = new THREE.Euler().setFromQuaternion(wk_mtx, order)
+  //     set_wrist_rot({ x: round(toAngle(wk_euler.x)), y: round(toAngle(wk_euler.y)), z: round(toAngle(wk_euler.z)) })
+  //   }
+  // }, [controller_object_quaternion.x, controller_object_quaternion.y, controller_object_quaternion.z, controller_object_quaternion.w])
+
+  // tsutsui コントローラの移動を取得
   React.useEffect(() => {
     if (rendered && vrModeRef.current && trigger_on && !tool_menu_on && !tool_load_operation && !put_down_box_operation && !switchingVrMode) {
-      const move_pos = pos_sub(start_pos, controller_object_position)
-      //move_pos.x = move_pos.x/2
-      //move_pos.y = move_pos.y/2
-      //move_pos.z = move_pos.z/2
-      let target_pos
-      if (save_target === undefined) {
-        set_save_target({ ...target })
-        target_pos = pos_sub(target, move_pos)
-      } else {
-        target_pos = pos_sub(save_target, move_pos)
-      }
-      if (target_pos.y < 0.012) {
-        target_pos.y = 0.012
-      }
-      set_target({ x: round(target_pos.x), y: round(target_pos.y), z: round(target_pos.z) })
-    }
-  }, [controller_object_position.x, controller_object_position.y, controller_object_position.z])
+      if (last_controller_pose_ref.current.position.x !== 0) {
+        // 動作差分計算
+        const { position: lastPosition, quaternion: lastQuaternion } = last_controller_pose_ref.current;
+        let deltaPosition = pos_sub(lastPosition, controllerObjectPose.position); // tn-1→tn ここだけfilter
+        let deltaRotation = lastQuaternion.clone().invert().multiply(controllerObjectPose.quaternion); // tn-1→tn
 
-  // コントローラの回転を取得
-  React.useEffect(() => {
-    if (rendered && vrModeRef.current && trigger_on && !tool_menu_on && !tool_load_operation && !put_down_box_operation && !switchingVrMode) {
-      const wk_quatDiff1 = controller_progress_quat.clone().invert().multiply(controller_object_quaternion);
-      const wk_diff_1 = quaternionToAngle(wk_quatDiff1)
-      const quatDifference1 = new THREE.Quaternion().setFromAxisAngle(wk_diff_1.axis, wk_diff_1.radian / 3);
+        // filter
+        deltaPosition.x *= 1 / 4 / 55 //基本スケール縮小(1/4) * 移動距離を速度に変換(大体55msec程度)
+        deltaPosition.y *= 1 / 4 / 55
+        deltaPosition.z *= 1 / 4 / 55
+        deltaRotation = scaleQuaternion(deltaRotation, 1 / 4 / 55)
 
-      const quatDifference2 = controller_start_quat.clone().invert().multiply(robot_save_quat);
+        const filtered = noizeFilterRef.current.applyFilter(deltaPosition, deltaRotation)
+        deltaPosition = filtered.position
+        deltaRotation = filtered.quaternion
+        deltaPosition = emphasizeMovementFilter(deltaPosition)
+        deltaRotation = emphasizeRotationFilter(deltaRotation)
+        deltaPosition = suppressMovementFilter(deltaPosition, deltaRotation)
+        deltaRotation = suppressRotationFilter(deltaPosition, deltaRotation)
 
-      const wk_mtx = controller_start_quat.clone().multiply(quatDifference1).multiply(controller_acc_quat).multiply(quatDifference2);
-      if (Math.abs(wk_diff_1.angle) > 135) {
-        controller_progress_quat.copy(controller_object_quaternion)
-        controller_acc_quat.multiply(quatDifference1)
-      }
+        deltaPosition.x *= 55 // 速度を移動変化に戻す
+        deltaPosition.y *= 55
+        deltaPosition.z *= 55
+        deltaRotation = scaleQuaternion(deltaRotation, 55)
 
-      wk_mtx.multiply(
-        new THREE.Quaternion().setFromEuler(
-          new THREE.Euler(
-            (0.6654549523360951 * -1),  //x
-            Math.PI,  //y
-            Math.PI,  //z
-            order
+        //既存実装(開始Poseと現在Poseからtargetを決定)
+        // const move_pos = pos_add(pos_sub(start_pos, lastPosition), deltaPosition); //s→tn-1 + tn-1→tn
+        const move_pos = pos_add(cumulative_controller_pose_ref.current.position, deltaPosition)
+        let target_pos
+        if (save_target === undefined) {
+          set_save_target({ ...target })
+          target_pos = pos_sub(target, move_pos)
+        } else {
+          target_pos = pos_sub(save_target, move_pos)
+        }
+        if (target_pos.y < 0.012) {
+          target_pos.y = 0.012
+        }
+        set_target({ x: round(target_pos.x), y: round(target_pos.y), z: round(target_pos.z) })
+
+
+        // const prev_cumulative_rotation = controller_progress_quat.clone().invert().multiply(lastQuaternion);// S→tn-1
+        // const new_cumulative_rotation = prev_cumulative_rotation.clone().multiply(deltaRotation);// S→tn-1 + tn-1→tn = S→tn の新しい累積回転量を構築
+
+        const cumulative_rotation = cumulative_controller_pose_ref.current.quaternion.clone()
+        const new_cumulative_rotation = cumulative_rotation.multiply(deltaRotation)
+
+        const wk_diff_1 = quaternionToAngle(new_cumulative_rotation)
+        const quatDifference1 = new THREE.Quaternion().setFromAxisAngle(wk_diff_1.axis, wk_diff_1.radian / 1);
+        const quatDifference2 = controller_start_quat.clone().invert().multiply(robot_save_quat);
+        const wk_mtx = controller_start_quat.clone().multiply(quatDifference1).multiply(controller_acc_quat).multiply(quatDifference2);
+
+        // 135度を超えた場合の処理
+        if (Math.abs(wk_diff_1.angle) > 135) {
+          controller_progress_quat.copy(controller_object_quaternion)
+          controller_acc_quat.multiply(quatDifference1)
+        }
+
+        wk_mtx.multiply(
+          new THREE.Quaternion().setFromEuler(
+            new THREE.Euler(
+              (0.6654549523360951 * -1),  //x
+              Math.PI,  //y
+              Math.PI,  //z
+              order
+            )
           )
         )
-      )
+        const wk_euler = new THREE.Euler().setFromQuaternion(wk_mtx, order)
+        set_wrist_rot({ x: round(toAngle(wk_euler.x)), y: round(toAngle(wk_euler.y)), z: round(toAngle(wk_euler.z)) })
 
-      const wk_euler = new THREE.Euler().setFromQuaternion(wk_mtx, order)
-      set_wrist_rot({ x: round(toAngle(wk_euler.x)), y: round(toAngle(wk_euler.y)), z: round(toAngle(wk_euler.z)) })
+        set_cumulative_controller_pose({ position: move_pos, quaternion: new_cumulative_rotation })
+      }
+      set_last_controller_pose(controllerObjectPose)
     }
-  }, [controller_object_quaternion.x, controller_object_quaternion.y, controller_object_quaternion.z, controller_object_quaternion.w])
+  }, [controllerObjectPose])
 
   const toolChange1 = () => {
     ToolChangeTbl.push({ ...Toolpos2front, speedfacter: 1 })
@@ -829,9 +1016,9 @@ export default function Home(props) {
 
   React.useEffect(() => {
     if (input_rotate[0] === undefined) return
-//    const wk_j1_Correct_value = normalize180(j1_Correct_value - (vrModeRef.current ? vrModeAngle_ref.current : 0))
-    const wk_j1_Correct_value = normalize180(j1_Correct_value -  vrModeAngle_ref.current )
-  
+    //    const wk_j1_Correct_value = normalize180(j1_Correct_value - (vrModeRef.current ? vrModeAngle_ref.current : 0))
+    const wk_j1_Correct_value = normalize180(j1_Correct_value - vrModeAngle_ref.current)
+
     const robot_rotate = {
       j1_rotate: round(normalize180(input_rotate[0] - wk_j1_Correct_value)),
       j2_rotate: round(normalize180(input_rotate[1] - j2_Correct_value)),
@@ -1498,6 +1685,8 @@ export default function Home(props) {
     //const vrcon_euler = new THREE.Euler().setFromQuaternion(vrcon_qua,order)
     robot_save_quat.copy(vrcon_qua)
     set_save_target(undefined)
+    set_cumulative_controller_pose({ position: { x: 0, y: 0, z: 0 }, quaternion: new THREE.Quaternion() })
+    set_last_controller_pose({ position: { x: 0, y: 0, z: 0 }, quaternion: new THREE.Quaternion() })
   }
 
   React.useEffect(() => {
@@ -1782,16 +1971,23 @@ export default function Home(props) {
           if ((tickprev + 50) < time) {
             tickprev = time
             let move = false
+            let updatedPose = {
+              position: controllerObjectPose.position.clone(),
+              quaternion: controllerObjectPose.quaternion.clone()
+            }
             const obj = this.el.object3D
-            if (!controller_object_position.equals(obj.position)) {
-              controller_object_position.copy(obj.position)
+            if (!controllerObjectPose.position.equals(obj.position)) {
+              // controller_object_position.copy(obj.position)
+              updatedPose.position = obj.position.clone()
               move = true
             }
-            if (!controller_object_quaternion.equals(obj.quaternion)) {
-              controller_object_quaternion.copy(obj.quaternion)
+            if (!controllerObjectPose.quaternion.equals(obj.quaternion)) {
+              // controller_object_quaternion.copy(obj.quaternion)
+              updatedPose.quaternion = obj.quaternion.clone()
               move = true
             }
             if (move) {
+              controllerObjectPose = updatedPose
               set_update((v) => v = v + 1)
             }
           }
@@ -1867,7 +2063,7 @@ export default function Home(props) {
             //          console.log("vrModeOffsetX_ref.current",vrModeOffsetX_ref.current)
             //          console.log(baseObject3D.position, joint_pos.base)
 
-            
+
             const wrist_qua = new THREE.Quaternion().setFromAxisAngle(
               y_vec_base, toRadian(vrModeAngle_ref.current)
             ).multiply(
@@ -1906,10 +2102,10 @@ export default function Home(props) {
               ).invert()
             )
             robot_save_quat.copy(vrcon_qua)
-            
+
             //const vrcon_euler = new THREE.Euler().setFromQuaternion(vrcon_qua,order)
             //console.log("wrist_rot",toAngle(vrcon_euler.x),toAngle(vrcon_euler.y),toAngle(vrcon_euler.z))
-            
+
             // ここからMQTT Start
             //let xrSession = this.el.renderer.xr.getSession();
             xrSession = this.el.renderer.xr.getSession();
@@ -2187,6 +2383,131 @@ export default function Home(props) {
   };
 
 
+  // tsutsui 目標姿勢決定用のフィルタ
+  // プレーンオブジェクトのクォータニオン用ヘルパー関数
+
+  function slerpQuaternion(q1, q2, t) {
+    let dot = q1.x * q2.x + q1.y * q2.y + q1.z * q2.z + q1.w * q2.w;
+
+    let q2_adjusted = { ...q2 };
+    if (dot < 0) {
+      q2_adjusted.x = -q2.x;
+      q2_adjusted.y = -q2.y;
+      q2_adjusted.z = -q2.z;
+      q2_adjusted.w = -q2.w;
+      dot = -dot;
+    }
+
+    // 線形補間か球面線形補間かを決定
+    if (dot > 0.9995) {
+      // 線形補間（クォータニオンが非常に近い場合）
+      return normalizeQuaternion({
+        x: q1.x + t * (q2_adjusted.x - q1.x),
+        y: q1.y + t * (q2_adjusted.y - q1.y),
+        z: q1.z + t * (q2_adjusted.z - q1.z),
+        w: q1.w + t * (q2_adjusted.w - q1.w)
+      });
+    }
+
+    // 球面線形補間
+    const theta_0 = Math.acos(Math.abs(dot));
+    const sin_theta_0 = Math.sin(theta_0);
+    const theta = theta_0 * t;
+    const sin_theta = Math.sin(theta);
+
+    const s0 = Math.cos(theta) - dot * sin_theta / sin_theta_0;
+    const s1 = sin_theta / sin_theta_0;
+
+    return {
+      x: s0 * q1.x + s1 * q2_adjusted.x,
+      y: s0 * q1.y + s1 * q2_adjusted.y,
+      z: s0 * q1.z + s1 * q2_adjusted.z,
+      w: s0 * q1.w + s1 * q2_adjusted.w
+    };
+  }
+
+  function normalizeQuaternion(q) {
+    const length = Math.sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+    if (length === 0) {
+      return { x: 0, y: 0, z: 0, w: 1 };
+    }
+    return {
+      x: q.x / length,
+      y: q.y / length,
+      z: q.z / length,
+      w: q.w / length
+    };
+  }
+
+  const emphasizeMovementFilter = (position, params = {
+    threshold: 0.001 / 35,
+    accelerationExponent: 2.3,
+    accelerationFactor: 180000 * Math.pow(35, 2.3),
+    maxAcceleration: 3,
+  }) => {
+    const movementDistance = distance(position, { x: 0, y: 0, z: 0 })
+    const emphasizedScale = calculateEmphasizeScale(movementDistance, params);
+    return { x: position.x * emphasizedScale, y: position.y * emphasizedScale, z: position.z * emphasizedScale }
+  }
+
+  const emphasizeRotationFilter = (quaternion, params = {
+    threshold: 0.005 / 35,
+    accelerationExponent: 2.3,
+    accelerationFactor: 1500 * Math.pow(35, 2.3),
+    maxAcceleration: 3,
+  }) => {
+    const { radian: rotationRadian } = quaternionToAngle(quaternion)
+    const emphasizedScale = calculateEmphasizeScale(rotationRadian, params);
+    return scaleQuaternion(quaternion, emphasizedScale)
+  }
+
+  const suppressMovementFilter = (position, quaternion, params = {
+    threshold: 0.01 / 35,
+    suppressionExponent: 1.5,
+    suppressionFactor: 500 * Math.pow(35, 1.5),
+    minSuppression: 0.001,
+  }) => {
+    const { radian: rotationRadian } = quaternionToAngle(quaternion)
+    const suppresedScale = calculateSuppressScale(rotationRadian, params);
+    return { x: position.x * suppresedScale, y: position.y * suppresedScale, z: position.z * suppresedScale }
+  }
+
+  const suppressRotationFilter = (position, quaternion, params = {
+    threshold: 0.01 / 35,
+    suppressionExponent: 1.5,
+    suppressionFactor: 10 * Math.pow(50, 1.5),
+    minSuppression: 0.0001,
+  }) => {
+    const movementDistance = distance(position, { x: 0, y: 0, z: 0 })
+    const suppresedScale = calculateSuppressScale(movementDistance, params);
+    return scaleQuaternion(quaternion, suppresedScale)
+  }
+
+  const calculateEmphasizeScale = (motionDifference, params) => {
+    if (motionDifference < params.threshold) return 1.0;
+    const normalizedInput = motionDifference - params.threshold;
+    const curvedInput = Math.pow(normalizedInput, params.accelerationExponent);
+    const acceleration = 1.0 + curvedInput * params.accelerationFactor;
+
+    return Math.min(acceleration, params.maxAcceleration);
+  }
+
+  const calculateSuppressScale = (motionDifference, params) => {
+    if (motionDifference < params.threshold) return 1.0;
+    const normalizedInput = Math.min((motionDifference - params.threshold), 1.0);
+    const curvedInput = Math.pow(normalizedInput, params.suppressionExponent);
+
+    return Math.max(1.0 - (curvedInput * params.suppressionFactor), params.minSuppression);
+  }
+
+  const scaleQuaternion = (quaternion, factor) => {
+    const identity = new THREE.Quaternion()
+    const scaledQuaternion = new THREE.Quaternion()
+    scaledQuaternion.slerpQuaternions(identity, quaternion, factor)
+    return scaledQuaternion
+  }
+
+
   if (rendered) {
 
     let rtc_message = "";
@@ -2209,7 +2530,7 @@ export default function Home(props) {
               /> : <></>
           }
 
-          <a-entity oculus-touch-controls="hand: right" vr-controller-right visible={`${false}`}></a-entity>
+          <a-entity oculus-touch-controls="hand: right" vr-controller-right visible={`${true}`}></a-entity>
           {/* Practice 用のベース */}
           <RobotBase appmode={props.appmode} target_error={target_error} />
           {/*  <a-circle id="circle3D" position="0 0 0" rotation="-90 0 0" radius={props.appmode===AppMode.practice?"0.75":"0.3"} color={target_error?"#ff7f50":"#7BC8A4"} opacity="0.5"></a-circle> */}
@@ -2478,3 +2799,4 @@ const Line = (props) => {
     visible={`${visible}`}
   ></a-entity>
 }
+
