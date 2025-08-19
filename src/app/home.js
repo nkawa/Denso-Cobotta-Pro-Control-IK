@@ -2384,61 +2384,6 @@ export default function Home(props) {
 
 
   // tsutsui 目標姿勢決定用のフィルタ
-  // プレーンオブジェクトのクォータニオン用ヘルパー関数
-
-  function slerpQuaternion(q1, q2, t) {
-    let dot = q1.x * q2.x + q1.y * q2.y + q1.z * q2.z + q1.w * q2.w;
-
-    let q2_adjusted = { ...q2 };
-    if (dot < 0) {
-      q2_adjusted.x = -q2.x;
-      q2_adjusted.y = -q2.y;
-      q2_adjusted.z = -q2.z;
-      q2_adjusted.w = -q2.w;
-      dot = -dot;
-    }
-
-    // 線形補間か球面線形補間かを決定
-    if (dot > 0.9995) {
-      // 線形補間（クォータニオンが非常に近い場合）
-      return normalizeQuaternion({
-        x: q1.x + t * (q2_adjusted.x - q1.x),
-        y: q1.y + t * (q2_adjusted.y - q1.y),
-        z: q1.z + t * (q2_adjusted.z - q1.z),
-        w: q1.w + t * (q2_adjusted.w - q1.w)
-      });
-    }
-
-    // 球面線形補間
-    const theta_0 = Math.acos(Math.abs(dot));
-    const sin_theta_0 = Math.sin(theta_0);
-    const theta = theta_0 * t;
-    const sin_theta = Math.sin(theta);
-
-    const s0 = Math.cos(theta) - dot * sin_theta / sin_theta_0;
-    const s1 = sin_theta / sin_theta_0;
-
-    return {
-      x: s0 * q1.x + s1 * q2_adjusted.x,
-      y: s0 * q1.y + s1 * q2_adjusted.y,
-      z: s0 * q1.z + s1 * q2_adjusted.z,
-      w: s0 * q1.w + s1 * q2_adjusted.w
-    };
-  }
-
-  function normalizeQuaternion(q) {
-    const length = Math.sqrt(q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
-    if (length === 0) {
-      return { x: 0, y: 0, z: 0, w: 1 };
-    }
-    return {
-      x: q.x / length,
-      y: q.y / length,
-      z: q.z / length,
-      w: q.w / length
-    };
-  }
-
   const emphasizeMovementFilter = (position, params = {
     threshold: 0.001 / 35,
     accelerationExponent: 2.3,
