@@ -118,109 +118,189 @@ let carryLuggage = false
 let boxpos_x = -0.2; // luggage-id 荷物の初期位置
 
 class MovingAverageMotionFilter {
- constructor(
-   windowSize = 5,
-   moveThreshold = 0.00001 / 35,
-   rotateThreshold = 0.0001 / 35
- ) {
-   this.windowSize = windowSize;
-   this.moveThreshold = moveThreshold;
-   this.rotateThreshold = rotateThreshold;
+  constructor(
+    windowSize = 5,
+    moveThreshold = 0.00001 / 35,
+    rotateThreshold = 0.0001 / 35
+  ) {
+    this.windowSize = windowSize;
+    this.moveThreshold = moveThreshold;
+    this.rotateThreshold = rotateThreshold;
 
-   this.positionBuffer = [];
-   this.quaternionBuffer = [];
+    this.positionBuffer = [];
+    this.quaternionBuffer = [];
 
-   this.smoothedPosition = { x: 0, y: 0, z: 0 };
-   this.smoothedQuaternion = new THREE.Quaternion(0, 0, 0, 1);
- }
+    this.smoothedPosition = { x: 0, y: 0, z: 0 };
+    this.smoothedQuaternion = new THREE.Quaternion(0, 0, 0, 1);
+  }
 
- applyFilter(position, quaternion) {
-   const filteredPosition = this.smoothPosition(position);
-   const filteredQuaternion = this.smoothQuaternion(quaternion);
+  applyFilter(position, quaternion) {
+    const filteredPosition = this.smoothPosition(position);
+    const filteredQuaternion = this.smoothQuaternion(quaternion);
 
-   return {
-     position: filteredPosition,
-     quaternion: filteredQuaternion
-   };
- }
+    return {
+      position: filteredPosition,
+      quaternion: filteredQuaternion
+    };
+  }
 
- smoothPosition(position) {
-   this.positionBuffer.push({ ...position });
-   if (this.positionBuffer.length > this.windowSize) {
-     this.positionBuffer.shift();
-   }
+  smoothPosition(position) {
+    this.positionBuffer.push({ ...position });
+    if (this.positionBuffer.length > this.windowSize) {
+      this.positionBuffer.shift();
+    }
 
-   const sum = this.positionBuffer.reduce((acc, val) => ({
-     x: acc.x + val.x,
-     y: acc.y + val.y,
-     z: acc.z + val.z
-   }), { x: 0, y: 0, z: 0 });
+    const sum = this.positionBuffer.reduce((acc, val) => ({
+      x: acc.x + val.x,
+      y: acc.y + val.y,
+      z: acc.z + val.z
+    }), { x: 0, y: 0, z: 0 });
 
-   this.smoothedPosition = {
-     x: sum.x / this.positionBuffer.length,
-     y: sum.y / this.positionBuffer.length,
-     z: sum.z / this.positionBuffer.length
-   };
+    this.smoothedPosition = {
+      x: sum.x / this.positionBuffer.length,
+      y: sum.y / this.positionBuffer.length,
+      z: sum.z / this.positionBuffer.length
+    };
 
-   this.smoothedPosition.x = Math.abs(this.smoothedPosition.x) < this.moveThreshold ? 0 : this.smoothedPosition.x;
-   this.smoothedPosition.y = Math.abs(this.smoothedPosition.y) < this.moveThreshold ? 0 : this.smoothedPosition.y;
-   this.smoothedPosition.z = Math.abs(this.smoothedPosition.z) < this.moveThreshold ? 0 : this.smoothedPosition.z;
+    this.smoothedPosition.x = Math.abs(this.smoothedPosition.x) < this.moveThreshold ? 0 : this.smoothedPosition.x;
+    this.smoothedPosition.y = Math.abs(this.smoothedPosition.y) < this.moveThreshold ? 0 : this.smoothedPosition.y;
+    this.smoothedPosition.z = Math.abs(this.smoothedPosition.z) < this.moveThreshold ? 0 : this.smoothedPosition.z;
 
-   return { ...this.smoothedPosition };
- }
+    return { ...this.smoothedPosition };
+  }
 
- smoothQuaternion(quaternion) {
-   // THREE.Quaternionとしてバッファに追加
-   this.quaternionBuffer.push(quaternion.clone());
-   if (this.quaternionBuffer.length > this.windowSize) {
-     this.quaternionBuffer.shift();
-   }
+  smoothQuaternion(quaternion) {
+    // THREE.Quaternionとしてバッファに追加
+    this.quaternionBuffer.push(quaternion.clone());
+    if (this.quaternionBuffer.length > this.windowSize) {
+      this.quaternionBuffer.shift();
+    }
 
-   if (this.quaternionBuffer.length === 1) {
-     this.smoothedQuaternion = this.quaternionBuffer[0].clone();
-   } else {
-     this.smoothedQuaternion = this.slerpAverage(this.quaternionBuffer);
-   }
+    if (this.quaternionBuffer.length === 1) {
+      this.smoothedQuaternion = this.quaternionBuffer[0].clone();
+    } else {
+      this.smoothedQuaternion = this.slerpAverage(this.quaternionBuffer);
+    }
 
-   // 回転角度の閾値チェック
-   const identity = new THREE.Quaternion(0, 0, 0, 1);
-   const rotationAngle = this.smoothedQuaternion.angleTo(identity);
-   
-   if (Math.abs(rotationAngle) < this.rotateThreshold) {
-     return new THREE.Quaternion(0, 0, 0, 1); // 単位クォータニオン
-   }
+    // 回転角度の閾値チェック
+    const identity = new THREE.Quaternion(0, 0, 0, 1);
+    const rotationAngle = this.smoothedQuaternion.angleTo(identity);
 
-   return this.smoothedQuaternion.clone();
- }
+    if (Math.abs(rotationAngle) < this.rotateThreshold) {
+      return new THREE.Quaternion(0, 0, 0, 1); // 単位クォータニオン
+    }
 
- slerpAverage(quaternions) {
-   if (quaternions.length === 0) {
-     return new THREE.Quaternion(0, 0, 0, 1);
-   }
-   if (quaternions.length === 1) {
-     return quaternions[0].clone();
-   }
+    return this.smoothedQuaternion.clone();
+  }
 
-   // 最初のクォータニオンから開始
-   let result = quaternions[0].clone();
-   
-   // 段階的にSLERPで平均化
-   for (let i = 1; i < quaternions.length; i++) {
-     const t = 1.0 / (i + 1);
-     result.slerp(quaternions[i], t);
-   }
-   
-   // THREE.jsのクォータニオンは自動的に正規化されるが、明示的に正規化
-   return result.normalize();
- }
+  slerpAverage(quaternions) {
+    if (quaternions.length === 0) {
+      return new THREE.Quaternion(0, 0, 0, 1);
+    }
+    if (quaternions.length === 1) {
+      return quaternions[0].clone();
+    }
 
- reset() {
-   this.positionBuffer = [];
-   this.quaternionBuffer = [];
-   this.smoothedPosition = { x: 0, y: 0, z: 0 };
-   this.smoothedQuaternion = new THREE.Quaternion(0, 0, 0, 1);
- }
+    // 最初のクォータニオンから開始
+    let result = quaternions[0].clone();
+
+    // 段階的にSLERPで平均化
+    for (let i = 1; i < quaternions.length; i++) {
+      const t = 1.0 / (i + 1);
+      result.slerp(quaternions[i], t);
+    }
+
+    // THREE.jsのクォータニオンは自動的に正規化されるが、明示的に正規化
+    return result.normalize();
+  }
+
+  reset() {
+    this.positionBuffer = [];
+    this.quaternionBuffer = [];
+    this.smoothedPosition = { x: 0, y: 0, z: 0 };
+    this.smoothedQuaternion = new THREE.Quaternion(0, 0, 0, 1);
+  }
 }
+
+// tsutsui 目標姿勢決定用のフィルタ
+const MOVEMENT_EMPHASIZE_DEFAULTS = {
+  threshold: 0.001 / 35,
+  accelerationExponent: 2.3,
+  accelerationFactor: 180000 * Math.pow(35, 2.3),
+  maxAcceleration: 3,
+};
+
+const ROTATION_EMPHASIZE_DEFAULTS = {
+  threshold: 0.005 / 35,
+  accelerationExponent: 2.3,
+  accelerationFactor: 1500 * Math.pow(35, 2.3),
+  maxAcceleration: 3,
+};
+
+const MOVEMENT_SUPPRESS_DEFAULTS = {
+  threshold: 0.05 / 35,
+  suppressionExponent: 1.5,
+  suppressionFactor: 500 * Math.pow(35, 1.5),
+  minSuppression: 0.001,
+};
+
+const ROTATION_SUPPRESS_DEFAULTS = {
+  threshold: 0.01 / 35,
+  suppressionExponent: 1.5,
+  suppressionFactor: 10 * Math.pow(35, 1.5),
+  minSuppression: 0.0001,
+};
+
+const emphasizeMovementFilter = (position, params = MOVEMENT_EMPHASIZE_DEFAULTS) => {
+  const movementDistance = Math.sqrt(position.x ** 2 + position.y ** 2 + position.z ** 2)
+  const emphasizedScale = calculateEmphasizeScale(movementDistance, params);
+  return { x: position.x * emphasizedScale, y: position.y * emphasizedScale, z: position.z * emphasizedScale }
+}
+
+const emphasizeRotationFilter = (quaternion, params = ROTATION_EMPHASIZE_DEFAULTS) => {
+  const q = quaternion.clone().normalize();
+  const rotationRadian = 2 * Math.acos(Math.abs(q.w));
+  const emphasizedScale = calculateEmphasizeScale(rotationRadian, params);
+  return scaleQuaternion(quaternion, emphasizedScale);
+}
+
+const suppressMovementFilter = (position, quaternion, params = MOVEMENT_SUPPRESS_DEFAULTS) => {
+  const q = quaternion.clone().normalize();
+  const rotationRadian = 2 * Math.acos(Math.abs(q.w));
+  const suppressedScale = calculateSuppressScale(rotationRadian, params);
+  return { x: position.x * suppressedScale, y: position.y * suppressedScale, z: position.z * suppressedScale }
+}
+
+const suppressRotationFilter = (position, quaternion, params = ROTATION_SUPPRESS_DEFAULTS) => {
+  const movementDistance = Math.sqrt(position.x ** 2 + position.y ** 2 + position.z ** 2)
+  const suppressedScale = calculateSuppressScale(movementDistance, params);
+  return scaleQuaternion(quaternion, suppressedScale);
+}
+
+const calculateEmphasizeScale = (motionDifference, params) => {
+  if (motionDifference < params.threshold) return 1.0;
+  const normalizedInput = motionDifference - params.threshold;
+  const curvedInput = Math.pow(normalizedInput, params.accelerationExponent);
+  const acceleration = 1.0 + curvedInput * params.accelerationFactor;
+
+  return Math.min(acceleration, params.maxAcceleration);
+}
+
+const calculateSuppressScale = (motionDifference, params) => {
+  if (motionDifference < params.threshold) return 1.0;
+  const normalizedInput = Math.min((motionDifference - params.threshold), 1.0);
+  const curvedInput = Math.pow(normalizedInput, params.suppressionExponent);
+
+  return Math.max(1.0 - (curvedInput * params.suppressionFactor), params.minSuppression);
+}
+
+const scaleQuaternion = (quaternion, factor) => {
+  const identity = new THREE.Quaternion()
+  const scaledQuaternion = new THREE.Quaternion()
+  scaledQuaternion.slerpQuaternions(identity, quaternion, factor)
+  return scaledQuaternion
+}
+
 
 // 再レンダリングしなくて値を更新する（かつ set_update で再レンダリングさせられる）
 function useRefState(updateFunc = undefined, initialValue = undefined) {
@@ -580,10 +660,10 @@ export default function Home(props) {
         let deltaRotation = lastQuaternion.clone().invert().multiply(controllerObjectPose.quaternion); // tn-1→tn
 
         // filter
-        deltaPosition.x *= 1 / 4 / 55 //基本スケール縮小(1/4) * 移動距離を速度に変換(大体55msec程度)
-        deltaPosition.y *= 1 / 4 / 55
-        deltaPosition.z *= 1 / 4 / 55
-        deltaRotation = scaleQuaternion(deltaRotation, 1 / 4 / 55)
+        deltaPosition.x *= 1 / 220 //基本スケール縮小(1/4) * 移動距離を速度に変換(大体55msec程度)
+        deltaPosition.y *= 1 / 220
+        deltaPosition.z *= 1 / 220
+        deltaRotation = scaleQuaternion(deltaRotation, 1 / 220)
 
         const filtered = noizeFilterRef.current.applyFilter(deltaPosition, deltaRotation)
         deltaPosition = filtered.position
@@ -2381,77 +2461,6 @@ export default function Home(props) {
       </a-entity>
     );
   };
-
-
-  // tsutsui 目標姿勢決定用のフィルタ
-  const emphasizeMovementFilter = (position, params = {
-    threshold: 0.001 / 35,
-    accelerationExponent: 2.3,
-    accelerationFactor: 180000 * Math.pow(35, 2.3),
-    maxAcceleration: 3,
-  }) => {
-    const movementDistance = distance(position, { x: 0, y: 0, z: 0 })
-    const emphasizedScale = calculateEmphasizeScale(movementDistance, params);
-    return { x: position.x * emphasizedScale, y: position.y * emphasizedScale, z: position.z * emphasizedScale }
-  }
-
-  const emphasizeRotationFilter = (quaternion, params = {
-    threshold: 0.005 / 35,
-    accelerationExponent: 2.3,
-    accelerationFactor: 1500 * Math.pow(35, 2.3),
-    maxAcceleration: 3,
-  }) => {
-    const { radian: rotationRadian } = quaternionToAngle(quaternion)
-    const emphasizedScale = calculateEmphasizeScale(rotationRadian, params);
-    return scaleQuaternion(quaternion, emphasizedScale)
-  }
-
-  const suppressMovementFilter = (position, quaternion, params = {
-    threshold: 0.01 / 35,
-    suppressionExponent: 1.5,
-    suppressionFactor: 500 * Math.pow(35, 1.5),
-    minSuppression: 0.001,
-  }) => {
-    const { radian: rotationRadian } = quaternionToAngle(quaternion)
-    const suppresedScale = calculateSuppressScale(rotationRadian, params);
-    return { x: position.x * suppresedScale, y: position.y * suppresedScale, z: position.z * suppresedScale }
-  }
-
-  const suppressRotationFilter = (position, quaternion, params = {
-    threshold: 0.01 / 35,
-    suppressionExponent: 1.5,
-    suppressionFactor: 10 * Math.pow(50, 1.5),
-    minSuppression: 0.0001,
-  }) => {
-    const movementDistance = distance(position, { x: 0, y: 0, z: 0 })
-    const suppresedScale = calculateSuppressScale(movementDistance, params);
-    return scaleQuaternion(quaternion, suppresedScale)
-  }
-
-  const calculateEmphasizeScale = (motionDifference, params) => {
-    if (motionDifference < params.threshold) return 1.0;
-    const normalizedInput = motionDifference - params.threshold;
-    const curvedInput = Math.pow(normalizedInput, params.accelerationExponent);
-    const acceleration = 1.0 + curvedInput * params.accelerationFactor;
-
-    return Math.min(acceleration, params.maxAcceleration);
-  }
-
-  const calculateSuppressScale = (motionDifference, params) => {
-    if (motionDifference < params.threshold) return 1.0;
-    const normalizedInput = Math.min((motionDifference - params.threshold), 1.0);
-    const curvedInput = Math.pow(normalizedInput, params.suppressionExponent);
-
-    return Math.max(1.0 - (curvedInput * params.suppressionFactor), params.minSuppression);
-  }
-
-  const scaleQuaternion = (quaternion, factor) => {
-    const identity = new THREE.Quaternion()
-    const scaledQuaternion = new THREE.Quaternion()
-    scaledQuaternion.slerpQuaternions(identity, quaternion, factor)
-    return scaledQuaternion
-  }
-
 
   if (rendered) {
 
