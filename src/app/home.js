@@ -117,6 +117,8 @@ let fallingSpeed = 0 // 落下中の荷物の速度
 let carryLuggage = false
 let boxpos_x = -0.2; // luggage-id 荷物の初期位置
 
+let isVerticalLock = true //先端の向きにy周りの回転のみを加算する
+
 class MovingAverageMotionFilter {
   constructor(
     windowSize = 5,
@@ -301,6 +303,19 @@ const scaleQuaternion = (quaternion, factor) => {
   return scaledQuaternion
 }
 
+const extractTwist = (quaternion, axis) => {
+  const normAxis = axis.normalize()
+  const quaternionVector = new THREE.Vector3(quaternion.x, quaternion.y, quaternion.z);  
+  const dotProduct = quaternionVector.dot(normAxis);  
+  // 軸周りの回転成分のみを抽出（ツイストクォータニオン）
+  const twistQuaternion = new THREE.Quaternion(
+      normAxis.x * dotProduct,
+      normAxis.y * dotProduct,
+      normAxis.z * dotProduct,
+      quaternion.w
+  ).normalize();
+  return twistQuaternion
+}
 
 // 再レンダリングしなくて値を更新する（かつ set_update で再レンダリングさせられる）
 function useRefState(updateFunc = undefined, initialValue = undefined) {
@@ -659,8 +674,13 @@ export default function Home(props) {
       if (last_controller_pose_ref.current.position.x !== 0) {
         // 動作差分計算
         const { position: lastPosition, quaternion: lastQuaternion } = last_controller_pose_ref.current;
-        let deltaPosition = pos_sub(lastPosition, controllerObjectPose.position); // tn-1→tn ここだけfilter
-        let deltaRotation = lastQuaternion.clone().invert().multiply(controllerObjectPose.quaternion); // tn-1→tn
+        let deltaPosition = pos_sub(controllerObjectPose.position, lastPosition); // tn-1→tn ここだけfilter
+        let deltaRotation = controllerObjectPose.quaternion.clone().multiply(lastQuaternion.clone().invert()) //tn-1→tn　グローバルでの回転(現在のコントローラ座標系に差分は依存しない)
+        
+        if(isVerticalLock){
+          const worldYAxis = new THREE.Vector3(0, 1, 0);  
+          deltaRotation = extractTwist(deltaRotation, worldYAxis)
+        }
 
         // filter
         deltaPosition.x *= 1 / 220 //基本スケール縮小(1/4) * 移動距離を速度に変換(大体55msec程度)
@@ -682,8 +702,8 @@ export default function Home(props) {
         deltaRotation = scaleQuaternion(deltaRotation, 55)
 
         //既存実装(開始Poseと現在Poseからtargetを決定)
-        // const move_pos = pos_add(pos_sub(start_pos, lastPosition), deltaPosition); //s→tn-1 + tn-1→tn
-        const move_pos = pos_add(cumulative_controller_pose_ref.current.position, deltaPosition)
+        const newCumulativePosition = pos_add(cumulative_controller_pose_ref.current.position, deltaPosition)
+        const move_pos = pos_sub(start_pos, newCumulativePosition)
         let target_pos
         if (save_target === undefined) {
           set_save_target({ ...target })
@@ -696,23 +716,11 @@ export default function Home(props) {
         }
         set_target({ x: round(target_pos.x), y: round(target_pos.y), z: round(target_pos.z) })
 
+        const cumulativeRotation = cumulative_controller_pose_ref.current.quaternion.clone()
+        const newCumulativeRotation = deltaRotation.multiply(cumulativeRotation) //world座標系で差分を累積し続ける
 
-        // const prev_cumulative_rotation = controller_progress_quat.clone().invert().multiply(lastQuaternion);// S→tn-1
-        // const new_cumulative_rotation = prev_cumulative_rotation.clone().multiply(deltaRotation);// S→tn-1 + tn-1→tn = S→tn の新しい累積回転量を構築
-
-        const cumulative_rotation = cumulative_controller_pose_ref.current.quaternion.clone()
-        const new_cumulative_rotation = cumulative_rotation.multiply(deltaRotation)
-
-        const wk_diff_1 = quaternionToAngle(new_cumulative_rotation)
-        const quatDifference1 = new THREE.Quaternion().setFromAxisAngle(wk_diff_1.axis, wk_diff_1.radian / 1);
-        const quatDifference2 = controller_start_quat.clone().invert().multiply(robot_save_quat);
-        const wk_mtx = controller_start_quat.clone().multiply(quatDifference1).multiply(controller_acc_quat).multiply(quatDifference2);
-
-        // 135度を超えた場合の処理
-        if (Math.abs(wk_diff_1.angle) > 135) {
-          controller_progress_quat.copy(controller_object_quaternion)
-          controller_acc_quat.multiply(quatDifference1)
-        }
+        const quatDifference2 = controller_start_quat.clone().invert().multiply(robot_save_quat); //コントローラスタートからロボットまでのworld
+        const wk_mtx = newCumulativeRotation.clone().multiply(quatDifference2); // 現在のコントローラ姿勢 * quatDifference2
 
         wk_mtx.multiply(
           new THREE.Quaternion().setFromEuler(
@@ -726,8 +734,9 @@ export default function Home(props) {
         )
         const wk_euler = new THREE.Euler().setFromQuaternion(wk_mtx, order)
         set_wrist_rot({ x: round(toAngle(wk_euler.x)), y: round(toAngle(wk_euler.y)), z: round(toAngle(wk_euler.z)) })
-
-        set_cumulative_controller_pose({ position: move_pos, quaternion: new_cumulative_rotation })
+        set_cumulative_controller_pose({ position: newCumulativePosition, quaternion: newCumulativeRotation })
+      }else{
+        set_cumulative_controller_pose({position: start_pos, quaternion:controller_start_quat}) //初期化
       }
       set_last_controller_pose(controllerObjectPose)
     }
