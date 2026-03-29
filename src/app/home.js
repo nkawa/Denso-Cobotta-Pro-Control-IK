@@ -44,12 +44,12 @@ const x_vec_base = new THREE.Vector3(1, 0, 0).normalize()
 const y_vec_base = new THREE.Vector3(0, 1, 0).normalize()
 const z_vec_base = new THREE.Vector3(0, 0, 1).normalize()
 
-const controller_start_quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.6654549523360951, 0, 0, order))
-const controller_progress_quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.6654549523360951, 0, 0, order))
-const robot_save_quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.6654549523360951, 0, 0, order))
-const controller_acc_quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, 0, order))
-const max_move_unit = [(1 / 120), (1 / 100), (1 / 120), (1 / 150), (1 / 150), (1 / 240)]
-const rotate_table = [[], [], [], [], [], []]
+const controller_start_quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.6654549523360951,0,0,order))
+const controller_progress_quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.6654549523360951,0,0,order))
+const robot_save_quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0.6654549523360951,0,0,order))
+const controller_acc_quat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0,0,0,order))
+const max_move_unit = [(1/120),(1/70),(1/120),(1/150),(1/150),(1/240)]
+const rotate_table = [[],[],[],[],[],[]]
 const object3D_table = []
 const rotvec_table = [y_vec_base, x_vec_base, x_vec_base, y_vec_base, x_vec_base, z_vec_base]
 let target_move_distance = 0
@@ -119,7 +119,7 @@ let boxpos_x = -0.2; // luggage-id 荷物の初期位置
 
 
 // 再レンダリングしなくて値を更新する（かつ set_update で再レンダリングさせられる）
-function useRefState(updateFunc = undefined, initialValue = undefined) {
+function useRefState(initialValue=undefined,updateFunc=undefined) {
   const ref = React.useRef(initialValue);
   function setValue(arg) {
     if (typeof arg === 'function') {
@@ -136,8 +136,10 @@ function useRefState(updateFunc = undefined, initialValue = undefined) {
 
 export default function Home(props) {
   const [update, set_update] = React.useState(0)
-  const [rendered, set_rendered] = useRefState(set_update, false)
-  const [target_error, set_target_error] = useRefState(set_update, false)
+  const [rendered,set_rendered] = useRefState(false)
+  const robotNameList = ["Model"]
+  const [robotName,set_robotName] = useRefState(robotNameList[0])
+  const [target_error,set_target_error] = useRefState(false)
 
   const vrModeAngle_ref = React.useRef(0)
   let vrModeAngle = vrModeAngle_ref.current
@@ -159,65 +161,66 @@ export default function Home(props) {
   }
 
   // WebRTCの統計情報を記録
-  const [rtcStats, set_rtcStats, rtcStats_ref] = useRefState(set_update, [])
+  const [rtcStats, set_rtcStats, rtcStats_ref ] = useRefState([])
 
 
-  const [j1_rotate, set_j1_rotate, j1_rotate_ref] = useRefState(set_update, 0)
-  const [j2_rotate, set_j2_rotate, j2_rotate_ref] = useRefState(set_update, 0)
-  const [j3_rotate, set_j3_rotate, j3_rotate_ref] = useRefState(set_update, 0)
-  const [j4_rotate, set_j4_rotate, j4_rotate_ref] = useRefState(set_update, 0)
-  const [j5_rotate, set_j5_rotate, j5_rotate_ref] = useRefState(set_update, 0)
-  const [j6_rotate, set_j6_rotate, j6_rotate_ref] = useRefState(set_update, 0)
-  const [j7_rotate, set_j7_rotate, j7_rotate_ref] = useRefState(set_update, 0)
-  const [j6_rotate_org, set_j6_rotate_org, j6_rotate_org_ref] = useRefState(set_update, 0)
+  const [j1_rotate,set_j1_rotate,j1_rotate_ref] = useRefState(0)
+  const [j2_rotate,set_j2_rotate,j2_rotate_ref] = useRefState(0)
+  const [j3_rotate,set_j3_rotate,j3_rotate_ref] = useRefState(0)
+  const [j4_rotate,set_j4_rotate,j4_rotate_ref] = useRefState(0)
+  const [j5_rotate,set_j5_rotate,j5_rotate_ref] = useRefState(0)
+  const [j6_rotate,set_j6_rotate,j6_rotate_ref] = useRefState(0)
+  const [j7_rotate,set_j7_rotate,j7_rotate_ref] = useRefState(0)
+  const [j6_rotate_org,set_j6_rotate_org,j6_rotate_org_ref] = useRefState(0)
 
   /*const outputRotateRef = React.useRef(
     [-j1_Correct_value,-j2_Correct_value,-j3_Correct_value,-j4_Correct_value,-j5_Correct_value,-j6_Correct_value,0]
   );*/ // ref を使って outputRotate を保持する
-  const [outputRotate, set_outputRotate, outputRotateRef] = useRefState(undefined,
-    [-j1_Correct_value, -j2_Correct_value, -j3_Correct_value, -j4_Correct_value, -j5_Correct_value, -j6_Correct_value, 0]
+  const [outputRotate,set_outputRotate,outputRotateRef] = useRefState(
+    [-j1_Correct_value,-j2_Correct_value,-j3_Correct_value,-j4_Correct_value,-j5_Correct_value,-j6_Correct_value,0]
   )
-  const [checkRotate, set_checkRotate, checkRotateRef] = useRefState(set_update, outputRotate)
+  const [checkRotate,set_checkRotate,checkRotateRef] = useRefState(outputRotate)
+  const [checkRotRatio,set_checkRotRatio,checkRotRatioRef] = useRefState([0,0,0,0,0,0])
 
   const prevRotateRef = React.useRef([0, 0, 0, 0, 0, 0, 0]) //前回の関節角度
 
-  const [input_rotate, set_input_rotate, input_rotateRef] = useRefState(set_update, [undefined, 0, 0, 0, 0, 0, 0])
+  const [input_rotate,set_input_rotate,input_rotateRef] = useRefState([undefined,0,0,0,0,0,0])
   const inputRotateFlg = React.useRef(false)
 
-  const [p15_object, set_p15_object] = useRefState(set_update, new THREE.Object3D())
-  const [p16_object, set_p16_object] = useRefState(set_update, new THREE.Object3D())
+  const [p15_object,set_p15_object] = useRefState(new THREE.Object3D())
+  const [p16_object,set_p16_object] = useRefState(new THREE.Object3D())
   const targetRef = React.useRef(null); // target 位置
 
-  const [p51_object, set_p51_object] = useRefState(set_update, new THREE.Object3D())
+  const [p51_object,set_p51_object] = useRefState(new THREE.Object3D())
 
-  const [grip, set_grip, gripRef] = useRefState(set_update, false);
+  const [grip,set_grip,gripRef] = useRefState(false);
 
-  const [start_pos, set_start_pos] = useRefState(set_update, new THREE.Object3D())
-  const [save_target, set_save_target] = useRefState(set_update)
+  const [start_pos,set_start_pos] = useRefState(new THREE.Object3D())
+  const [save_target,set_save_target] = useRefState()
 
   //const vrModeRef = React.useRef(false); // vr_mode はref のほうが使いやすい
-  const [vr_mode, set_vr_mode, vrModeRef] = useRefState(set_update, false)
+  const [vr_mode,set_vr_mode,vrModeRef] = useRefState(false)
   const robotIDRef = React.useRef("none");
 
-  const [test_pos, set_test_pos] = useRefState(set_update, { x: 0, y: 0, z: 0 })
+  const [test_pos,set_test_pos] = useRefState({x:0,y:0,z:0})
 
-  const [c_pos_x, set_c_pos_x] = useRefState(set_update, 0)
-  const [c_pos_y, set_c_pos_y] = useRefState(set_update, 0.45)
-  const [c_pos_z, set_c_pos_z] = useRefState(set_update, 1.2)
-  const [c_deg_x, set_c_deg_x] = useRefState(set_update, 0)
-  const [c_deg_y, set_c_deg_y] = useRefState(set_update, 0)
-  const [c_deg_z, set_c_deg_z] = useRefState(set_update, 0)
+  const [c_pos_x,set_c_pos_x] = useRefState(0)
+  const [c_pos_y,set_c_pos_y] = useRefState(0.35)
+  const [c_pos_z,set_c_pos_z] = useRefState(1.2)
+  const [c_deg_x,set_c_deg_x] = useRefState(0)
+  const [c_deg_y,set_c_deg_y] = useRefState(0)
+  const [c_deg_z,set_c_deg_z] = useRefState(0)
 
 
-  const [wrist_rot, set_wrist_rot_org, wrist_rot_ref] = useRefState(set_update, { x: 90, y: 0, z: 0 })
-  const [tool_rotate, set_tool_rotate, tool_rotate_ref] = useRefState(set_update, 0)
-  const [wrist_degree, set_wrist_degree] = useRefState(set_update, { direction: 0, angle: 0 })
-  const [dsp_message, set_dsp_message] = useRefState(set_update, "")
-  const [fps_message, set_fps_message] = useRefState(set_update, "0 fps")
+  const [wrist_rot,set_wrist_rot_org,wrist_rot_ref] = useRefState({x:90,y:0,z:0})
+  const [tool_rotate,set_tool_rotate,tool_rotate_ref] = useRefState(0)
+  const [wrist_degree,set_wrist_degree] = useRefState({direction:0,angle:0})
+  const [dsp_message,set_dsp_message] = useRefState("")
+  const [fps_message,set_fps_message] = useRefState("0 fps")
 
-  const toolNameList = ["No tool", "Gripper", "vgc10-1", "vgc10-4", "cutter", "boxLiftUp"]
-  const [toolName, set_toolName_org, toolNameRef] = useRefState(set_update, toolNameList[1])
-  const set_toolName = (newTool) => {
+  const toolNameList = ["No tool","Gripper","vgc10-1","vgc10-4","cutter","boxLiftUp"]
+  const [toolName,set_toolName_org,toolNameRef] = useRefState(toolNameList[1])
+  const set_toolName = (newTool)=>{
     const wk_tool_value = tool_menu_list.indexOf(newTool)
     if (wk_tool_value >= 0) {
       tool_menu_idx = wk_tool_value
@@ -228,19 +231,20 @@ export default function Home(props) {
     }
     document.cookie = `toolName=${newTool}; path=/; max-age=31536000;`
     set_toolName_org(newTool)
+    if (props.appmode === AppMode.viewer){
+      set_p15_16_len(0.18)
+    }else{
+      const idx = toolNameList.findIndex(e=>e===newTool)
+      set_p15_16_len(p15_16_len_tbl[idx])
+    }
   }
 
-  const [target, set_target_org, target_ref] = useRefState(set_update, real_target)
-  const [p15_16_len, set_p15_16_len] = useRefState(set_update, joint_pos.j7.z + 0.14)
-  const [p14_maxlen, set_p14_maxlen] = useRefState(set_update, 0)
+  const [target,set_target_org,target_ref] = useRefState(real_target)
+  const [p15_16_len,set_p15_16_len] = useRefState(joint_pos.j7.z+0.14)
+  const p15_16_len_tbl = [0.18,0.33,0.41,0.305,0.23,0.21]
+  const [p14_maxlen,set_p14_maxlen] = useRefState(0)
 
-  const [do_target_update, set_do_target_update] = useRefState(set_update, 0)
-
-
-  const [debug_message, set_debug_message] = React.useState("")
-  const add_debug_message = (message) => {
-    set_debug_message((prev) => { prev + " " + message })
-  }
+  const [do_target_update,set_do_target_update] = useRefState(0)
 
   function getCookie(name) {
     const value = document.cookie
@@ -250,12 +254,16 @@ export default function Home(props) {
   }
 
   React.useEffect(() => {
-    const wk_vrModeAngle = getCookie('vrModeAngle')
-    set_vrModeAngle(wk_vrModeAngle ? parseFloat(wk_vrModeAngle) : 0)
-    const wk_vrModeOffsetX = getCookie('vrModeOffsetX')
-    set_vrModeOffsetX(wk_vrModeOffsetX ? parseFloat(wk_vrModeOffsetX) : 0)
-    const wk_toolName = getCookie('toolName')
-    set_toolName(wk_toolName ? wk_toolName : "vgc10-1") // changeDefault to "vgc10-1" for DEMO
+    if (!(props.appmode === AppMode.viewer)) {
+      const wk_vrModeAngle = getCookie('vrModeAngle')
+      set_vrModeAngle(wk_vrModeAngle ? parseFloat(wk_vrModeAngle) : 0)
+      const wk_vrModeOffsetX = getCookie('vrModeOffsetX')
+      set_vrModeOffsetX(wk_vrModeOffsetX ? parseFloat(wk_vrModeOffsetX) : 0)
+      const wk_toolName = getCookie('toolName')
+      set_toolName(wk_toolName ? wk_toolName : "vgc10-1") // changeDefault to "vgc10-1" for DEMO
+    }else{
+      set_toolName(toolName)
+    }
     /*if(!props.viewer){
       requestAnimationFrame(get_real_joint_rot)
     }*/
@@ -529,7 +537,7 @@ export default function Home(props) {
           current_data.starttime = performance.now()
           current_data.start_quaternion = current_object3D.quaternion.clone()
           current_data.end_quaternion = new THREE.Quaternion().setFromAxisAngle(rotvec_table[i], toRadian(current_data.rot))
-          if (switchingVrMode) {
+          if (switchingVrMode || tool_load_operation) { //VRモード移行中 or ツール交換中はアニメーションしない。
             current_data.move_time = 0
           } else {
             const move_time_1 = target_move_distance * target_move_speed
@@ -574,6 +582,7 @@ export default function Home(props) {
         set_checkRotate([...input_rotateRef.current])
       }
     }
+    set_update((v)=>v=v+1)
   }
   //}, [now])
 
@@ -716,45 +725,27 @@ export default function Home(props) {
   }, [gripRef.current, j7_rotate_ref.current])
 
   React.useEffect(() => {
-    if (rotate_table[0].length > 1) {
-      rotate_table[0].pop()
-    }
-    rotate_table[0].push({ rot: j1_rotate, first: true })
+    rotate_table[0] = [{ rot: j1_rotate, first: true }]
   }, [j1_rotate])
 
   React.useEffect(() => {
-    if (rotate_table[1].length > 1) {
-      rotate_table[1].pop()
-    }
-    rotate_table[1].push({ rot: j2_rotate, first: true })
+    rotate_table[1] = [{ rot: j2_rotate, first: true }]
   }, [j2_rotate])
 
   React.useEffect(() => {
-    if (rotate_table[2].length > 1) {
-      rotate_table[2].pop()
-    }
-    rotate_table[2].push({ rot: j3_rotate, first: true })
+    rotate_table[2] = [{ rot: j3_rotate, first: true }]
   }, [j3_rotate])
 
   React.useEffect(() => {
-    if (rotate_table[3].length > 1) {
-      rotate_table[3].pop()
-    }
-    rotate_table[3].push({ rot: j4_rotate, first: true })
+    rotate_table[3] = [{ rot: j4_rotate, first: true }]
   }, [j4_rotate])
 
   React.useEffect(() => {
-    if (rotate_table[4].length > 1) {
-      rotate_table[4].pop()
-    }
-    rotate_table[4].push({ rot: j5_rotate, first: true })
+    rotate_table[4] = [{ rot: j5_rotate, first: true }]
   }, [j5_rotate])
 
   React.useEffect(() => {
-    if (rotate_table[5].length > 1) {
-      rotate_table[5].pop()
-    }
-    rotate_table[5].push({ rot: j6_rotate, first: true })
+    rotate_table[5] = [{ rot: j6_rotate, first: true }]
   }, [j6_rotate])
 
   React.useEffect(() => {
@@ -858,10 +849,20 @@ export default function Home(props) {
     }
   }, [j1_rotate, j2_rotate, j3_rotate, j4_rotate, j5_rotate, j6_rotate, j7_rotate])
 
-  React.useEffect(() => {
-    if (input_rotate[0] === undefined) return
+  const inputReflection = () => {
     //    const wk_j1_Correct_value = normalize180(j1_Correct_value - (vrModeRef.current ? vrModeAngle_ref.current : 0))
     const wk_j1_Correct_value = normalize180(j1_Correct_value - vrModeAngle_ref.current)
+
+    if(tool_load_operation || put_down_box_operation){
+      set_j1_rotate(round(normalize180(input_rotate[0] - wk_j1_Correct_value)))
+      set_j2_rotate(round(normalize180(input_rotate[1] - j2_Correct_value)))
+      set_j3_rotate(round(normalize180(input_rotate[2] - j3_Correct_value)))
+      set_j4_rotate(round(normalize180(input_rotate[3] - j4_Correct_value)))
+      set_j5_rotate(round(normalize180(input_rotate[4] - j5_Correct_value)))
+      set_j6_rotate(round(normalize180(input_rotate[5] - j6_Correct_value)))
+      set_j7_rotate(input_rotate[6]) // 指用
+      return
+    }
 
     const robot_rotate = {
       j1_rotate: round(normalize180(input_rotate[0] - wk_j1_Correct_value)),
@@ -882,7 +883,26 @@ export default function Home(props) {
     }); // これだと場所だけ (手首の相対もやるべし！)
     set_j7_rotate(input_rotate[6]) // 指用
 
+  }
+
+  React.useEffect(() => {
+    if (input_rotate[0] === undefined) return
+    inputReflection()
   }, [input_rotate[0], input_rotate[1], input_rotate[2], input_rotate[3], input_rotate[4], input_rotate[5], input_rotate[6]])
+
+  React.useEffect(() => {
+    if (input_rotate[0] === undefined) return
+    if(!tool_load_operation){
+      inputReflection()
+    }
+  }, [tool_load_operation])
+
+  React.useEffect(() => {
+    if (input_rotate[0] === undefined) return
+    if(!put_down_box_operation){
+      inputReflection()
+    }
+  }, [put_down_box_operation])
 
   const get_j5_quaternion = (rot_x = wrist_rot.x, rot_y = wrist_rot.y, rot_z = wrist_rot.z) => {
     return new THREE.Quaternion().setFromEuler(
@@ -976,7 +996,7 @@ export default function Home(props) {
                     // put_down_box 終了通知
                     viewer_put_down_box_end = true
                     viewer_put_down_box = false
-                  }, 20000)
+                  }, 40000)
                 }
               }
             }
@@ -1036,7 +1056,7 @@ export default function Home(props) {
                 set_update((v) => v = v + 1)
               }
               if (firstReceiveJoint || tool_load_operation || put_down_box_operation) {
-                if (input_rotateRef.current.some((e, i) => e !== joints[i])) {
+                if (input_rotateRef.current.some((e, i) => e !== joints[i])) {  //受け取ったジョイント角度が前回と一つでも変わっていたら
                   console.log("receive joints", joints)
                   set_input_rotate([...joints])
                   inputRotateFlg.current = true
@@ -1138,7 +1158,7 @@ export default function Home(props) {
     if (rendered) {
       set_do_target_update((prev) => prev + 1) // increment the counter to trigger target_update
     }
-  }, [target.x, target.y, target.z, tool_rotate, rendered, wrist_rot.x, wrist_rot.y, wrist_rot.z, p15_16_len])
+  }, [target.x, target.y, target.z, tool_rotate, rendered, wrist_rot.x, wrist_rot.y, wrist_rot.z/*, p15_16_len*/])
 
   const target_update = () => {
     const p21_pos = get_p21_pos()
@@ -1244,31 +1264,40 @@ export default function Home(props) {
     }
 
     if (dsp_message === "" && !(props.appmode === AppMode.viewer) && !inputRotateFlg.current) {
+      const ratioTbl = [0,0,0,0,0,0]
       const check_result = outRotateConv(result_rotate, [...checkRotateRef.current])
-      if (check_result.j1_rotate < -j1_limit || check_result.j1_rotate > j1_limit) {
-        dsp_message = `j1_rotate 指定可能範囲外！:(${check_result.j1_rotate})`
-        j1_error = true
+      if(!(tool_load_operation || put_down_box_operation)){
+        if (check_result.j1_rotate < -j1_limit || check_result.j1_rotate > j1_limit) {
+          dsp_message = `j1_rotate 指定可能範囲外！:(${check_result.j1_rotate})`
+          j1_error = true
+        }
+        if (check_result.j2_rotate < -j2_limit || check_result.j2_rotate > j2_limit) {
+          dsp_message = `j2_rotate 指定可能範囲外！:(${check_result.j2_rotate})`
+          j2_error = true
+        }
+        if (check_result.j3_rotate < -j3_limit || check_result.j3_rotate > j3_limit) {
+          dsp_message = `j3_rotate 指定可能範囲外！:(${check_result.j3_rotate})`
+          j3_error = true
+        }
+        if (check_result.j4_rotate < -j4_limit || check_result.j4_rotate > j4_limit) {
+          dsp_message = `j4_rotate 指定可能範囲外！:(${check_result.j4_rotate})`
+          j4_error = true
+        }
+        if (check_result.j5_rotate < -j5_limit || check_result.j5_rotate > j5_limit) {
+          dsp_message = `j5_rotate 指定可能範囲外！:(${check_result.j5_rotate})`
+          j5_error = true
+        }
+        if (check_result.j6_rotate < -j6_limit || check_result.j6_rotate > j6_limit) {
+          dsp_message = `j6_rotate 指定可能範囲外！:(${check_result.j6_rotate})`
+          j6_error = true
+        }
       }
-      if (check_result.j2_rotate < -j2_limit || check_result.j2_rotate > j2_limit) {
-        dsp_message = `j2_rotate 指定可能範囲外！:(${check_result.j2_rotate})`
-        j2_error = true
-      }
-      if (check_result.j3_rotate < -j3_limit || check_result.j3_rotate > j3_limit) {
-        dsp_message = `j3_rotate 指定可能範囲外！:(${check_result.j3_rotate})`
-        j3_error = true
-      }
-      if (check_result.j4_rotate < -j4_limit || check_result.j4_rotate > j4_limit) {
-        dsp_message = `j4_rotate 指定可能範囲外！:(${check_result.j4_rotate})`
-        j4_error = true
-      }
-      if (check_result.j5_rotate < -j5_limit || check_result.j5_rotate > j5_limit) {
-        dsp_message = `j5_rotate 指定可能範囲外！:(${check_result.j5_rotate})`
-        j5_error = true
-      }
-      if (check_result.j6_rotate < -j6_limit || check_result.j6_rotate > j6_limit) {
-        dsp_message = `j6_rotate 指定可能範囲外！:(${check_result.j6_rotate})`
-        j6_error = true
-      }
+      ratioTbl[0] = check_result.j1_rotate/j1_limit
+      ratioTbl[1] = check_result.j2_rotate/j2_limit
+      ratioTbl[2] = check_result.j3_rotate/j3_limit
+      ratioTbl[3] = check_result.j4_rotate/j4_limit
+      ratioTbl[4] = check_result.j5_rotate/j5_limit
+      ratioTbl[5] = check_result.j6_rotate/j6_limit
       if (dsp_message === "") {
         const check_rotate = [
           check_result.j1_rotate,
@@ -1280,6 +1309,7 @@ export default function Home(props) {
           checkRotateRef.current[6]
         ]
         set_checkRotate(check_rotate)
+        set_checkRotRatio(ratioTbl)
       }
     }
 
@@ -1491,13 +1521,13 @@ export default function Home(props) {
     return { k: kakudo, t: takasa }
   }
 
-  React.useEffect(() => {
+  /*React.useEffect(() => {
     if (rendered) {
       const p15_pos = new THREE.Vector3().applyMatrix4(p15_object.matrix)
       const p16_pos = new THREE.Vector3().applyMatrix4(p16_object.matrix)
       set_p15_16_len(distance(p15_pos, p16_pos))
     }
-  }, [p16_object.matrix.elements[14]])
+  }, [p16_object.matrix.elements[14]])*/
 
   const vrControllStart = () => {
     controller_start_quat.copy(controller_object.quaternion.clone())
@@ -1537,7 +1567,7 @@ export default function Home(props) {
       setTimeout(() => {
         set_rendered(true)
         console.log('set_rendered')
-      }, 500)
+      }, 1)
 
       const teihen = joint_pos.j5.x
       const takasa = joint_pos.j3.y + joint_pos.j4.y
@@ -1991,9 +2021,9 @@ export default function Home(props) {
               set_c_deg_z(0)
             }
           });
-          /*},
-          tick: function (t) {*/
-          //setTick(t)
+        },
+        tick: function (t) {
+          set_update((v)=>v=v+1)
         }
       });
     }
@@ -2079,7 +2109,8 @@ export default function Home(props) {
 
   const robotProps = {
     joint_pos, j2_rotate, j3_rotate, j4_rotate, j5_rotate, j6_rotate, j7_rotate,
-    toolNameList, toolName, cursor_vis, box_vis, edit_pos, pos_add, j1_error, j2_error, j3_error, j4_error, j5_error, j6_error
+    toolNameList, toolName, cursor_vis, box_vis, edit_pos, pos_add, j1_error, j2_error, j3_error, j4_error, j5_error, j6_error,
+    x_vec_base, y_vec_base, z_vec_base, checkRotRatio,
   }
 
   const Toolmenu = (props) => {
@@ -2342,56 +2373,29 @@ const Assets = (props) => {
 
 const RobotModel = (props) => {
   const { cursor_vis, edit_pos, joint_pos, pos_add, j1_error, j2_error, j3_error, j4_error, j5_error, j6_error, base_rotate } = props
-  //  console.log("Joint base",joint_pos.base)
+  const { x_vec_base, y_vec_base, z_vec_base, checkRotRatio } = props
   return (<>
     <a-entity j_id="0" gltf-model="#base" position={edit_pos(joint_pos.base)} model-opacity="0.8" rotation={`0 ${base_rotate} 0'}`}>
-      <a-entity geometry="primitive: circle; radius: 0.16;" material="color: #00FFFF; opacity: 0.8" position="0 0.1 0" rotation="-90 0 0" visible={`${j1_error}`}></a-entity>
-      <a-entity geometry="primitive: circle; radius: 0.16;" material="color: #00FFFF; opacity: 0.8" position="0 0.1 0" rotation="90 0 0" visible={`${j1_error}`}></a-entity>
+      <RotationGauge {...props} ratio={checkRotRatio[0]} pos={pos_add(joint_pos.j1,{x:0,y:0.1,z:0})} rotation_vec={y_vec_base} adjustAngle={90} visible={j1_error} />
       <a-entity j_id="1" gltf-model="#j1" position={edit_pos(joint_pos.j1)} model-opacity="0.8" shadow="cast: true">
-        <a-entity position="0 0.1 0" rotation="90 0 0" visible={`${j1_error}`}>
-          <a-cylinder position="0 0.08 0" rotation="0 0 0" radius="0.003" height="0.16" color="#FF0000"></a-cylinder>
-        </a-entity>
-        <a-entity geometry="primitive: circle; radius: 0.14; thetaStart: -60; thetaLength: 300" material="color: #00FFFF; opacity: 0.8" position={edit_pos(pos_add(joint_pos.j2, { x: -0.08, y: 0, z: 0 }))} rotation="0 90 0" visible={`${j2_error}`}></a-entity>
-        <a-entity geometry="primitive: circle; radius: 0.14; thetaStart: -60; thetaLength: 300" material="color: #00FFFF; opacity: 0.8" position={edit_pos(pos_add(joint_pos.j2, { x: -0.08, y: 0, z: 0 }))} rotation="0 -90 0" visible={`${j2_error}`}></a-entity>
+        <RotationGauge {...props} ratio={checkRotRatio[1]} pos={joint_pos.j2} rotation_vec={x_vec_base} adjustAngle={90} visible={j2_error} />
         <a-entity j_id="2" gltf-model="#j2" position={edit_pos(joint_pos.j2)} model-opacity="0.8" shadow="cast: true">
-          <a-entity position="-0.08 0 0" rotation="0 0 0" visible={`${j2_error}`}>
-            <a-cylinder position="0 0.07 0" rotation="0 0 0" radius="0.003" height="0.14" color="#FF0000"></a-cylinder>
-          </a-entity>
-          <a-entity geometry="primitive: circle; radius: 0.14; thetaStart: -60; thetaLength: 300" material="color: #00FFFF; opacity: 0.8" position={edit_pos(pos_add(joint_pos.j3, { x: -0.09, y: 0, z: 0 }))} rotation="0 90 0" visible={`${j3_error}`}></a-entity>
-          <a-entity geometry="primitive: circle; radius: 0.14; thetaStart: -60; thetaLength: 300" material="color: #00FFFF; opacity: 0.8" position={edit_pos(pos_add(joint_pos.j3, { x: -0.09, y: 0, z: 0 }))} rotation="0 -90 0" visible={`${j3_error}`}></a-entity>
+          <RotationGauge {...props} ratio={checkRotRatio[2]} pos={joint_pos.j3} rotation_vec={x_vec_base} adjustAngle={90} visible={j3_error} />
           <a-entity j_id="3" gltf-model="#j3" position={edit_pos(joint_pos.j3)} model-opacity="0.8" shadow="cast: true">
-            <a-entity position="-0.09 0 0" rotation="0 0 0" visible={`${j3_error}`}>
-              <a-cylinder position="0 0.07 0" rotation="0 0 0" radius="0.003" height="0.14" color="#FF0000"></a-cylinder>
-            </a-entity>
-            <a-entity geometry="primitive: circle; radius: 0.14;" material="color: #00FFFF; opacity: 0.8" position="-0.03 0.302 0" rotation="-90 0 0" visible={`${j4_error}`}></a-entity>
-            <a-entity geometry="primitive: circle; radius: 0.14;" material="color: #00FFFF; opacity: 0.8" position="-0.03 0.302 0" rotation="90 0 0" visible={`${j4_error}`}></a-entity>
+            <RotationGauge {...props} ratio={checkRotRatio[3]} pos={pos_add(joint_pos.j4,{x:0,y:-0.1,z:0})} rotation_vec={y_vec_base} adjustAngle={0} visible={j4_error} />
             <a-entity j_id="4" gltf-model="#j4" position={edit_pos(joint_pos.j4)} model-opacity="0.8" shadow="cast: true">
-              <a-entity position="0 -0.087 0" rotation="90 0 0" visible={`${j4_error}`} >
-                <a-cylinder position="0 0.07 0" rotation="0 0 0" radius="0.003" height="0.14" color="#FF0000"></a-cylinder>
-              </a-entity>
-              <a-entity geometry="primitive: circle; radius: 0.14; thetaStart: -60; thetaLength: 300" material="color: #00FFFF; opacity: 0.8" position={edit_pos(pos_add(joint_pos.j5, { x: 0.077, y: 0, z: 0 }))} rotation="0 90 0" visible={`${j5_error}`}></a-entity>
-              <a-entity geometry="primitive: circle; radius: 0.14; thetaStart: -60; thetaLength: 300" material="color: #00FFFF; opacity: 0.8" position={edit_pos(pos_add(joint_pos.j5, { x: 0.077, y: 0, z: 0 }))} rotation="0 -90 0" visible={`${j5_error}`}></a-entity>
+              <RotationGauge {...props} ratio={checkRotRatio[4]} pos={pos_add(joint_pos.j5,{x:0.08,y:0,z:0})} rotation_vec={x_vec_base} adjustAngle={180} visible={j5_error} />
               <a-entity j_id="5" gltf-model="#j5" position={edit_pos(joint_pos.j5)} model-opacity="0.8" shadow="cast: true">
-                <a-entity position="0.077 0 0" rotation="90 0 0" visible={`${j5_error}`}>
-                  <a-cylinder position="0 0.07 0" rotation="0 0 0" radius="0.003" height="0.14" color="#FF0000"></a-cylinder>
-                </a-entity>
-                <a-entity geometry="primitive: circle; radius: 0.14;" material="color: #00FFFF; opacity: 0.8" position="0.15 0 0.0805" rotation="0 0 0" visible={`${j6_error}`}></a-entity>
-                <a-entity geometry="primitive: circle; radius: 0.14;" material="color: #00FFFF; opacity: 0.8" position="0.15 0 0.0805" rotation="0 180 0" visible={`${j6_error}`}></a-entity>
+                <RotationGauge {...props} ratio={checkRotRatio[5]} pos={pos_add(joint_pos.j6,{x:0,y:0,z:0.15})} rotation_vec={z_vec_base} adjustAngle={0} visible={j6_error} />
                 <a-entity j_id="6" gltf-model="#j6" position={edit_pos(joint_pos.j6)} model-opacity="0.8" shadow="cast: true">
-                  <a-entity position="0 0 0.0805" rotation="0 0 0" visible={`${j6_error}`}>
-                    <a-cylinder position="0 0.07 0" rotation="0 0 0" radius="0.003" height="0.14" color="#FF0000"></a-cylinder>
-                  </a-entity>
                   <Model_Tool {...props} />
-                  {/*<a-cylinder color="crimson" height="0.1" radius="0.005" position={edit_pos(joint_pos.j7)}></a-cylinder>*/}
                   <Cursor3dp j_id="15" visible={cursor_vis} />
                 </a-entity>
               </a-entity>
               <Cursor3dp j_id="14" pos={{ x: joint_pos.j5.x, y: 0, z: 0 }} visible={cursor_vis} />
               <Cursor3dp j_id="13" visible={cursor_vis} />
             </a-entity>
-            {/*<Cursor3dp j_id="12" visible={cursor_vis}/>*/}
           </a-entity>
-          {/*<Cursor3dp j_id="11" visible={cursor_vis}/>*/}
         </a-entity>
       </a-entity>
     </a-entity>
@@ -2462,7 +2466,46 @@ const Model_Tool = (props) => {
   return null
 }
 
-
+const RotationGauge = (props)=>{
+  const z_vec = new THREE.Vector3(0, 0, 1).normalize()
+  const toAngle = rad => rad * 180 / Math.PI;
+  const {radiusInner=0.12, radiusOuter=0.18,
+    thetaStart=90, thetaLength=180, adjustAngle=0,
+    rotation_vec, ratio=0, threshold=0.9,
+    gaugeColor="#00FFFF", pointerColor="#FF0000", pointerRadius=0.005,
+    opacity=0.8, visible=false} = props
+  const pointer_len = radiusOuter - radiusInner
+  const axis = new THREE.Vector3().crossVectors(z_vec, rotation_vec).normalize()
+  const angle = z_vec.clone().angleTo(rotation_vec)
+  const quat = new THREE.Quaternion().setFromAxisAngle(axis,angle)
+  const base_rotate = new THREE.Euler().setFromQuaternion(quat)
+  const min_angle = -(180 - thetaStart)
+  const max_angle = (thetaLength + min_angle)
+  const pointer_angle = ratio<0?min_angle*-ratio:max_angle*ratio
+  const res_visible = visible || Math.abs(ratio)>=threshold
+  return(<>
+    <a-entity position={props.edit_pos(props.pos)}
+      rotation={`${toAngle(base_rotate.x)} ${toAngle(base_rotate.y)} ${toAngle(base_rotate.z)+adjustAngle}`}
+      visible={`${res_visible}`}>
+      <a-entity
+        geometry={`primitive: ring; radiusInner: ${radiusInner}; radiusOuter: ${radiusOuter};`+
+          `thetaStart: ${thetaStart}; thetaLength: ${thetaLength}`}
+        material={`color: ${gaugeColor}; opacity: ${opacity}; side: double`}
+        opacity={`${opacity}`}
+      ></a-entity>
+      <a-entity rotation={`0 0 ${pointer_angle}`}>
+        <a-cylinder
+          position={`-${radiusInner+(pointer_len/2)} 0 0`}
+          rotation="0 0 90"
+          radius={`${pointerRadius}`}
+          height={`${pointer_len}`}
+          color={`${pointerColor}`}
+          opacity={`${opacity}`}
+        ></a-cylinder>
+      </a-entity>
+    </a-entity>
+  </>)
+}
 
 const Cursor3dp = (props) => {
   const { pos = { x: 0, y: 0, z: 0 }, rot = { x: 0, y: 0, z: 0 }, len = 0.3, opa = 1, children, visible = false, ...otherprops } = props;
